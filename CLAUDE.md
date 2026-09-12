@@ -37,6 +37,7 @@ Consequences for you:
 
 ```sh
 npm run dev -- --filter api        # the app in scope (turbo passthrough)
+npm run next-dev --workspace=api   # same server, without the Stripe listener
 npm run build                      # turbo build; `test` is a dependsOn, so tests gate builds
 npm run check                      # ultracite (Biome) lint
 npm run fix                        # ultracite autofix
@@ -48,6 +49,8 @@ npm run db:push                    # prisma format + generate + db push
 ```
 
 Only `apps/api` and `apps/app` have tests (vitest, `vitest.config.mts`, `NODE_ENV=test`). Both pass.
+
+`apps/api`'s `dev` script is `concurrently "npm:next-dev" "npm:stripe"`, and the Stripe CLI is not installed here, so that half dies with `stripe: command not found` (exit 127). It is harmless noise — `concurrently` has no `--kill-others`, so Next stays up and serves normally. Use `next-dev` directly to avoid the noise, or install the Stripe CLI when you need to exercise `/webhooks/payments` locally.
 
 | App | Port | Scope | Notes |
 |-----|------|-------|-------|
