@@ -10,7 +10,7 @@
     "@ai-sdk/openai": "^3.0.41",
     "@t3-oss/env-nextjs": "^0.13.10",
     "ai": "^6.0.116",
-    "react": "19.2.4",
+    "react": "19.2.8",
     "streamdown": "^2.4.0",
     "tailwind-merge": "^3.5.0",
     "zod": "^4.3.6"
@@ -18,7 +18,7 @@
   "devDependencies": {
     "@repo/typescript-config": "*",
     "@types/node": "25.3.5",
-    "@types/react": "19.2.14",
+    "@types/react": "19.2.18",
     "@types/react-dom": "19.2.3"
   }
 }
