@@ -1,0 +1,1255 @@
+generator client {
+  provider        = "prisma-client"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["partialIndexes"]
+  moduleFormat    = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["auth", "public"]
+}
+
+model users {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email              String?   @db.VarChar(255)
+  encrypted_password String?   @db.VarChar(255)
+  email_confirmed_at DateTime? @db.Timestamptz(6)
+  raw_app_meta_data  Json?
+  raw_user_meta_data Json?
+  banned_until       DateTime? @db.Timestamptz(6)
+  created_at         DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime? @default(now()) @db.Timestamptz(6)
+  usuario            usuario?
+
+  @@schema("auth")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model alerta_inventario {
+  id               String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  banco_id         String           @db.Uuid
+  lote_id          String?          @db.Uuid
+  tipo             String           @db.VarChar(30)
+  nivel            severidad        @default(MEDIA)
+  dias_para_vencer Int?             @db.SmallInt
+  mensaje          String
+  generada_at      DateTime         @default(now()) @db.Timestamptz(6)
+  atendida_at      DateTime?        @db.Timestamptz(6)
+  atendida_por     String?          @db.Uuid
+  accion_tomada    String?
+  banco_alimentos  banco_alimentos  @relation(fields: [banco_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_alerta_banco")
+  lote_inventario  lote_inventario? @relation(fields: [lote_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_alerta_lote")
+  usuario          usuario?         @relation(fields: [atendida_por], references: [id], onUpdate: NoAction, map: "fk_alerta_usuario")
+
+  @@unique([lote_id, tipo], map: "uq_alerta_abierta", where: raw("((atendida_at IS NULL) AND (lote_id IS NOT NULL))"))
+  @@index([banco_id, generada_at(sort: Desc)], map: "ix_alerta_banco", where: raw("(atendida_at IS NULL)"))
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model almacen {
+  id                     String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  banco_id               String                   @db.Uuid
+  nombre                 String                   @db.VarChar(80)
+  direccion              String                   @db.VarChar(255)
+  ciudad                 String                   @db.VarChar(80)
+  ubicacion              Unsupported("geography")
+  telefono               String?                  @db.VarChar(20)
+  horario_disponibilidad Json
+  tipo                   tipo_almacenamiento
+  capacidad_kg           Decimal                  @db.Decimal(12, 2)
+  temperatura_min        Decimal?                 @db.Decimal(4, 1)
+  temperatura_max        Decimal?                 @db.Decimal(4, 1)
+  activo                 Boolean                  @default(true)
+  created_at             DateTime                 @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime                 @default(now()) @db.Timestamptz(6)
+  banco_alimentos        banco_alimentos          @relation(fields: [banco_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_almacen_banco")
+  donacion               donacion[]
+  lote_inventario        lote_inventario[]
+  parada_ruta            parada_ruta[]
+  recepcion_donacion     recepcion_donacion[]
+  ruta                   ruta[]
+
+  @@unique([banco_id, nombre], map: "uq_almacen_banco_nombre")
+  @@index([ubicacion], map: "ix_almacen_ubicacion", type: Gist)
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model asignacion {
+  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  donacion_id       String             @unique(map: "uq_asignacion_vigente", where: raw("(estado = ANY (ARRAY['OFRECIDA'::estado_asignacion, 'ACEPTADA'::estado_asignacion]))")) @db.Uuid
+  voluntario_id     String?            @db.Uuid
+  banco_ejecutor_id String?            @db.Uuid
+  ruta_id           String?            @db.Uuid
+  intento           Int                @default(1) @db.SmallInt
+  estado            estado_asignacion  @default(OFRECIDA)
+  score             Decimal?           @db.Decimal(6, 3)
+  distancia_km      Decimal?           @db.Decimal(7, 2)
+  ofrecida_at       DateTime           @default(now()) @db.Timestamptz(6)
+  expira_at         DateTime           @db.Timestamptz(6)
+  respondida_at     DateTime?          @db.Timestamptz(6)
+  aceptada_at       DateTime?          @db.Timestamptz(6)
+  finalizada_at     DateTime?          @db.Timestamptz(6)
+  abandonada_at     DateTime?          @db.Timestamptz(6)
+  motivo_id         Int?               @db.SmallInt
+  observacion       String?
+  created_at        DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime           @default(now()) @db.Timestamptz(6)
+  banco_alimentos   banco_alimentos?   @relation(fields: [banco_ejecutor_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "fk_asignacion_banco")
+  donacion          donacion           @relation(fields: [donacion_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_asignacion_donacion")
+  motivo            motivo?            @relation(fields: [motivo_id], references: [id], onUpdate: NoAction, map: "fk_asignacion_motivo")
+  ruta              ruta?              @relation(fields: [ruta_id], references: [id], onUpdate: NoAction, map: "fk_asignacion_ruta")
+  voluntario        voluntario?        @relation(fields: [voluntario_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "fk_asignacion_voluntario")
+  calificacion      calificacion[]
+  historial_estado  historial_estado[]
+  incidencia        incidencia[]
+  notificacion      notificacion[]
+
+  @@unique([donacion_id, intento], map: "uq_asignacion_intento")
+  @@index([expira_at], map: "ix_asignacion_expira", where: raw("(estado = 'OFRECIDA'::estado_asignacion)"))
+  @@index([voluntario_id, estado, ofrecida_at(sort: Desc)], map: "ix_asignacion_voluntario")
+  @@schema("public")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model auditoria {
+  id                 BigInt   @id @default(autoincrement())
+  usuario_id         String?  @db.Uuid
+  accion             String   @db.VarChar(20)
+  entidad            String   @db.VarChar(60)
+  entidad_id         String?
+  valores_anteriores Json?
+  valores_nuevos     Json?
+  ip                 String?  @db.Inet
+  user_agent         String?
+  created_at         DateTime @default(now()) @db.Timestamptz(6)
+  usuario            usuario? @relation(fields: [usuario_id], references: [id], onUpdate: NoAction, map: "fk_auditoria_usuario")
+
+  @@index([entidad, entidad_id], map: "ix_auditoria_entidad")
+  @@index([created_at], map: "ix_auditoria_fecha", type: Brin)
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model banco_alimentos {
+  id                  String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  nombre              String                   @unique(map: "uq_banco_nombre") @db.VarChar(150)
+  documento_fiscal    String?                  @unique(map: "uq_banco_documento") @db.VarChar(30)
+  direccion           String                   @db.VarChar(255)
+  ciudad              String                   @db.VarChar(80)
+  ubicacion           Unsupported("geography")
+  telefono            String?                  @db.VarChar(20)
+  email               String?                  @db.Citext
+  capacidad_total_kg  Decimal                  @default(0) @db.Decimal(12, 2)
+  radio_operacion_km  Decimal?                 @db.Decimal(6, 2)
+  tiene_flota_propia  Boolean                  @default(false)
+  horario_recepcion   Json?
+  activo              Boolean                  @default(true)
+  created_at          DateTime                 @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime                 @default(now()) @db.Timestamptz(6)
+  deleted_at          DateTime?                @db.Timestamptz(6)
+  alerta_inventario   alerta_inventario[]
+  almacen             almacen[]
+  asignacion          asignacion[]
+  banco_tipo_alimento banco_tipo_alimento[]
+  distribucion        distribucion[]
+  lote_inventario     lote_inventario[]
+  parametro_sistema   parametro_sistema[]
+  ruta                ruta[]
+
+  @@index([ubicacion], map: "ix_banco_ubicacion", type: Gist)
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model banco_tipo_alimento {
+  banco_id         String          @db.Uuid
+  tipo_alimento_id Int             @db.SmallInt
+  acepta           Boolean         @default(true)
+  capacidad_max_kg Decimal?        @db.Decimal(12, 2)
+  stock_minimo_kg  Decimal?        @db.Decimal(12, 2)
+  created_at       DateTime        @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime        @default(now()) @db.Timestamptz(6)
+  banco_alimentos  banco_alimentos @relation(fields: [banco_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_bta_banco")
+  tipo_alimento    tipo_alimento   @relation(fields: [tipo_alimento_id], references: [id], onUpdate: NoAction, map: "fk_bta_tipo")
+
+  @@id([banco_id, tipo_alimento_id], map: "pk_banco_tipo_alimento")
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model calificacion {
+  id                                           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  asignacion_id                                String     @db.Uuid
+  calificador_id                               String     @db.Uuid
+  calificado_id                                String     @db.Uuid
+  puntaje                                      Int        @db.SmallInt
+  comentario                                   String?
+  created_at                                   DateTime   @default(now()) @db.Timestamptz(6)
+  asignacion                                   asignacion @relation(fields: [asignacion_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_calificacion_asignacion")
+  usuario_calificacion_calificador_idTousuario usuario    @relation("calificacion_calificador_idTousuario", fields: [calificador_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_calificacion_emisor")
+  usuario_calificacion_calificado_idTousuario  usuario    @relation("calificacion_calificado_idTousuario", fields: [calificado_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_calificacion_receptor")
+
+  @@unique([asignacion_id, calificador_id, calificado_id], map: "uq_calificacion")
+  @@index([calificado_id, created_at(sort: Desc)], map: "ix_calificacion_calificado")
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model candidato_asignacion {
+  id                   String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  donacion_id          String     @db.Uuid
+  voluntario_id        String     @db.Uuid
+  posicion             Int        @db.SmallInt
+  score                Decimal    @db.Decimal(6, 3)
+  distancia_km         Decimal    @db.Decimal(7, 2)
+  cumple_capacidad     Boolean
+  cumple_horario       Boolean
+  cumple_refrigeracion Boolean
+  ofrecido             Boolean    @default(false)
+  generado_at          DateTime   @default(now()) @db.Timestamptz(6)
+  donacion             donacion   @relation(fields: [donacion_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_candidato_donacion")
+  voluntario           voluntario @relation(fields: [voluntario_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_candidato_voluntario")
+
+  @@unique([donacion_id, voluntario_id], map: "uq_candidato")
+  @@index([donacion_id, posicion], map: "ix_candidato_donacion")
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model categoria_alimento {
+  id                     Int             @id @default(autoincrement()) @db.SmallInt
+  codigo                 String          @unique(map: "uq_categoria_alimento_codigo") @db.VarChar(30)
+  nombre                 String          @db.VarChar(80)
+  requiere_refrigeracion Boolean         @default(false)
+  vida_util_dias_ref     Int?            @db.SmallInt
+  activo                 Boolean         @default(true)
+  created_at             DateTime        @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime        @default(now()) @db.Timestamptz(6)
+  tipo_alimento          tipo_alimento[]
+
+  @@schema("public")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model dispositivo_push {
+  id            String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  usuario_id    String                 @db.Uuid
+  token_push    String                 @unique(map: "uq_dispositivo_token")
+  plataforma    plataforma_dispositivo
+  modelo        String?                @db.VarChar(80)
+  version_app   String?                @db.VarChar(20)
+  activo        Boolean                @default(true)
+  ultimo_uso_at DateTime?              @db.Timestamptz(6)
+  created_at    DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime               @default(now()) @db.Timestamptz(6)
+  usuario       usuario                @relation(fields: [usuario_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_dispositivo_usuario")
+  notificacion  notificacion[]
+
+  @@index([usuario_id], map: "ix_dispositivo_usuario", where: raw("activo"))
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model distribucion {
+  id                        String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  codigo                    String                    @unique(map: "uq_distribucion_codigo") @db.VarChar(20)
+  banco_id                  String                    @db.Uuid
+  tipo_destino_id           Int                       @db.SmallInt
+  nombre_destino            String                    @db.VarChar(150)
+  documento_destino         String?                   @db.VarChar(30)
+  contacto                  String?                   @db.VarChar(120)
+  telefono                  String?                   @db.VarChar(20)
+  numero_beneficiarios      Int?
+  fecha_distribucion        DateTime                  @default(now()) @db.Timestamptz(6)
+  estado                    estado_distribucion       @default(BORRADOR)
+  responsable_id            String                    @db.Uuid
+  observaciones             String?
+  created_at                DateTime                  @default(now()) @db.Timestamptz(6)
+  updated_at                DateTime                  @default(now()) @db.Timestamptz(6)
+  banco_alimentos           banco_alimentos           @relation(fields: [banco_id], references: [id], onUpdate: NoAction, map: "fk_distribucion_banco")
+  usuario                   usuario                   @relation(fields: [responsable_id], references: [id], onUpdate: NoAction, map: "fk_distribucion_resp")
+  tipo_destino_distribucion tipo_destino_distribucion @relation(fields: [tipo_destino_id], references: [id], onUpdate: NoAction, map: "fk_distribucion_tipo")
+  distribucion_detalle      distribucion_detalle[]
+
+  @@index([banco_id, fecha_distribucion(sort: Desc)], map: "ix_distribucion_banco")
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model distribucion_detalle {
+  id                    String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  distribucion_id       String                  @db.Uuid
+  lote_id               String                  @db.Uuid
+  cantidad              Decimal                 @db.Decimal(12, 2)
+  peso_kg               Decimal                 @db.Decimal(12, 2)
+  created_at            DateTime                @default(now()) @db.Timestamptz(6)
+  distribucion          distribucion            @relation(fields: [distribucion_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_dd_distribucion")
+  lote_inventario       lote_inventario         @relation(fields: [lote_id], references: [id], onUpdate: NoAction, map: "fk_dd_lote")
+  movimiento_inventario movimiento_inventario[]
+
+  @@unique([distribucion_id, lote_id], map: "uq_distribucion_detalle")
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model donacion {
+  id                                      String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  codigo                                  String                   @unique(map: "uq_donacion_codigo") @db.VarChar(20)
+  donante_id                              String                   @db.Uuid
+  almacen_destino_id                      String?                  @db.Uuid
+  estado                                  estado_donacion          @default(BORRADOR)
+  modo_recoleccion                        modo_recoleccion         @default(VOLUNTARIO)
+  titulo                                  String?                  @db.VarChar(120)
+  descripcion                             String?
+  peso_estimado_kg                        Decimal                  @db.Decimal(10, 2)
+  peso_recogido_kg                        Decimal?                 @db.Decimal(10, 2)
+  peso_recibido_kg                        Decimal?                 @db.Decimal(10, 2)
+  requiere_refrigeracion                  Boolean                  @default(false)
+  fecha_vencimiento_min                   DateTime?                @db.Date
+  ventana_recogida_inicio                 DateTime                 @db.Timestamptz(6)
+  ventana_recogida_fin                    DateTime                 @db.Timestamptz(6)
+  direccion_recogida                      String                   @db.VarChar(255)
+  referencia_recogida                     String?
+  ubicacion_recogida                      Unsupported("geography")
+  contacto_nombre                         String?                  @db.VarChar(120)
+  contacto_telefono                       String?                  @db.VarChar(20)
+  score_urgencia                          Decimal?                 @db.Decimal(6, 3)
+  publicada_at                            DateTime?                @db.Timestamptz(6)
+  expira_publicacion_at                   DateTime?                @db.Timestamptz(6)
+  asignada_at                             DateTime?                @db.Timestamptz(6)
+  recogida_at                             DateTime?                @db.Timestamptz(6)
+  entregada_at                            DateTime?                @db.Timestamptz(6)
+  recibida_at                             DateTime?                @db.Timestamptz(6)
+  cancelada_at                            DateTime?                @db.Timestamptz(6)
+  cancelada_por                           String?                  @db.Uuid
+  motivo_cancelacion_id                   Int?                     @db.SmallInt
+  observacion_cancelacion                 String?
+  created_at                              DateTime                 @default(now()) @db.Timestamptz(6)
+  updated_at                              DateTime                 @default(now()) @db.Timestamptz(6)
+  created_by                              String                   @db.Uuid
+  updated_by                              String?                  @db.Uuid
+  asignacion                              asignacion?
+  candidato_asignacion                    candidato_asignacion[]
+  almacen                                 almacen?                 @relation(fields: [almacen_destino_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "fk_donacion_almacen")
+  usuario_donacion_cancelada_porTousuario usuario?                 @relation("donacion_cancelada_porTousuario", fields: [cancelada_por], references: [id], onUpdate: NoAction, map: "fk_donacion_cancela")
+  usuario_donacion_created_byTousuario    usuario                  @relation("donacion_created_byTousuario", fields: [created_by], references: [id], onUpdate: NoAction, map: "fk_donacion_created")
+  donante                                 donante                  @relation(fields: [donante_id], references: [id], onUpdate: NoAction, map: "fk_donacion_donante")
+  motivo                                  motivo?                  @relation(fields: [motivo_cancelacion_id], references: [id], onUpdate: NoAction, map: "fk_donacion_motivo")
+  usuario_donacion_updated_byTousuario    usuario?                 @relation("donacion_updated_byTousuario", fields: [updated_by], references: [id], onUpdate: NoAction, map: "fk_donacion_updated")
+  donacion_item                           donacion_item[]
+  evidencia                               evidencia[]
+  historial_estado                        historial_estado[]
+  incidencia                              incidencia[]
+  notificacion                            notificacion[]
+  parada_ruta                             parada_ruta[]
+  recepcion_donacion                      recepcion_donacion?
+
+  @@index([score_urgencia(sort: Desc), ventana_recogida_fin], map: "ix_donacion_abiertas", where: raw("(estado = 'PUBLICADA'::estado_donacion)"))
+  @@index([almacen_destino_id, estado], map: "ix_donacion_almacen", where: raw("(almacen_destino_id IS NOT NULL)"))
+  @@index([donante_id, created_at(sort: Desc)], map: "ix_donacion_donante")
+  @@index([estado, ventana_recogida_inicio], map: "ix_donacion_estado")
+  @@index([expira_publicacion_at], map: "ix_donacion_expira", where: raw("(estado = 'PUBLICADA'::estado_donacion)"))
+  @@index([ubicacion_recogida], map: "ix_donacion_ubicacion", type: Gist)
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model donacion_item {
+  id                     String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  donacion_id            String            @db.Uuid
+  tipo_alimento_id       Int               @db.SmallInt
+  unidad_medida_id       Int               @db.SmallInt
+  descripcion            String?           @db.VarChar(150)
+  cantidad               Decimal           @db.Decimal(10, 2)
+  peso_estimado_kg       Decimal           @db.Decimal(10, 2)
+  peso_real_kg           Decimal?          @db.Decimal(10, 2)
+  fecha_vencimiento      DateTime?         @db.Date
+  requiere_refrigeracion Boolean           @default(false)
+  ruta_foto              String?
+  observaciones          String?
+  created_at             DateTime          @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime          @default(now()) @db.Timestamptz(6)
+  donacion               donacion          @relation(fields: [donacion_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_item_donacion")
+  tipo_alimento          tipo_alimento     @relation(fields: [tipo_alimento_id], references: [id], onUpdate: NoAction, map: "fk_item_tipo")
+  unidad_medida          unidad_medida     @relation(fields: [unidad_medida_id], references: [id], onUpdate: NoAction, map: "fk_item_unidad")
+  lote_inventario        lote_inventario[]
+
+  @@index([donacion_id], map: "ix_item_donacion")
+  @@index([fecha_vencimiento], map: "ix_item_vencimiento", where: raw("(fecha_vencimiento IS NOT NULL)"))
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model donante {
+  id                    String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  usuario_id            String     @unique(map: "uq_donante_usuario") @db.Uuid
+  total_donaciones      Int        @default(0)
+  total_kg_donados      Decimal    @default(0) @db.Decimal(12, 2)
+  calificacion_promedio Decimal?   @db.Decimal(3, 2)
+  total_calificaciones  Int        @default(0)
+  activo                Boolean    @default(true)
+  created_at            DateTime   @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime   @default(now()) @db.Timestamptz(6)
+  deleted_at            DateTime?  @db.Timestamptz(6)
+  donacion              donacion[]
+  usuario               usuario    @relation(fields: [usuario_id], references: [id], onUpdate: NoAction, map: "fk_donante_usuario")
+
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model evidencia {
+  id                 String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tipo               tipo_evidencia
+  url                String
+  donacion_id        String?                   @db.Uuid
+  parada_id          String?                   @db.Uuid
+  recepcion_id       String?                   @db.Uuid
+  incidencia_id      String?                   @db.Uuid
+  capturada_at       DateTime                  @default(now()) @db.Timestamptz(6)
+  ubicacion          Unsupported("geography")?
+  precision_m        Decimal?                  @db.Decimal(7, 1)
+  hash_archivo       String?                   @db.VarChar(64)
+  mime_type          String?                   @db.VarChar(50)
+  tamano_bytes       Int?
+  subida_por         String                    @db.Uuid
+  created_at         DateTime                  @default(now()) @db.Timestamptz(6)
+  donacion           donacion?                 @relation(fields: [donacion_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_evidencia_donacion")
+  incidencia         incidencia?               @relation(fields: [incidencia_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_evidencia_incidencia")
+  parada_ruta        parada_ruta?              @relation(fields: [parada_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_evidencia_parada")
+  recepcion_donacion recepcion_donacion?       @relation(fields: [recepcion_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_evidencia_recepcion")
+  usuario            usuario                   @relation(fields: [subida_por], references: [id], onUpdate: NoAction, map: "fk_evidencia_usuario")
+
+  @@index([donacion_id], map: "ix_evidencia_donacion", where: raw("(donacion_id IS NOT NULL)"))
+  @@index([incidencia_id], map: "ix_evidencia_incidencia", where: raw("(incidencia_id IS NOT NULL)"))
+  @@index([parada_id], map: "ix_evidencia_parada", where: raw("(parada_id IS NOT NULL)"))
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model historial_estado {
+  id              BigInt                    @id @default(autoincrement())
+  ambito          ambito_entidad
+  donacion_id     String?                   @db.Uuid
+  asignacion_id   String?                   @db.Uuid
+  ruta_id         String?                   @db.Uuid
+  parada_id       String?                   @db.Uuid
+  incidencia_id   String?                   @db.Uuid
+  lote_id         String?                   @db.Uuid
+  estado_anterior String?                   @db.VarChar(40)
+  estado_nuevo    String                    @db.VarChar(40)
+  usuario_id      String?                   @db.Uuid
+  motivo          String?
+  metadata        Json?
+  ubicacion       Unsupported("geography")?
+  created_at      DateTime                  @default(now()) @db.Timestamptz(6)
+  asignacion      asignacion?               @relation(fields: [asignacion_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_historial_asignacion")
+  donacion        donacion?                 @relation(fields: [donacion_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_historial_donacion")
+  incidencia      incidencia?               @relation(fields: [incidencia_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_historial_incidencia")
+  lote_inventario lote_inventario?          @relation(fields: [lote_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_historial_lote")
+  parada_ruta     parada_ruta?              @relation(fields: [parada_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_historial_parada")
+  ruta            ruta?                     @relation(fields: [ruta_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_historial_ruta")
+  usuario         usuario?                  @relation(fields: [usuario_id], references: [id], onUpdate: NoAction, map: "fk_historial_usuario")
+
+  @@index([donacion_id, created_at], map: "ix_historial_donacion", where: raw("(donacion_id IS NOT NULL)"))
+  @@index([created_at], map: "ix_historial_fecha", type: Brin)
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model incidencia {
+  id                                        String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  codigo                                    String                    @unique(map: "uq_incidencia_codigo") @db.VarChar(20)
+  tipo_incidencia_id                        Int                       @db.SmallInt
+  reportada_por                             String                    @db.Uuid
+  donacion_id                               String?                   @db.Uuid
+  asignacion_id                             String?                   @db.Uuid
+  parada_id                                 String?                   @db.Uuid
+  recepcion_id                              String?                   @db.Uuid
+  descripcion                               String
+  nivel                                     severidad                 @default(MEDIA)
+  estado                                    estado_incidencia         @default(ABIERTA)
+  ubicacion                                 Unsupported("geography")?
+  asignada_a                                String?                   @db.Uuid
+  resolucion                                String?
+  resuelta_at                               DateTime?                 @db.Timestamptz(6)
+  resuelta_por                              String?                   @db.Uuid
+  created_at                                DateTime                  @default(now()) @db.Timestamptz(6)
+  updated_at                                DateTime                  @default(now()) @db.Timestamptz(6)
+  evidencia                                 evidencia[]
+  historial_estado                          historial_estado[]
+  asignacion                                asignacion?               @relation(fields: [asignacion_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_incidencia_asignacion")
+  usuario_incidencia_asignada_aTousuario    usuario?                  @relation("incidencia_asignada_aTousuario", fields: [asignada_a], references: [id], onUpdate: NoAction, map: "fk_incidencia_asignada")
+  donacion                                  donacion?                 @relation(fields: [donacion_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_incidencia_donacion")
+  parada_ruta                               parada_ruta?              @relation(fields: [parada_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_incidencia_parada")
+  recepcion_donacion                        recepcion_donacion?       @relation(fields: [recepcion_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_incidencia_recepcion")
+  usuario_incidencia_reportada_porTousuario usuario                   @relation("incidencia_reportada_porTousuario", fields: [reportada_por], references: [id], onUpdate: NoAction, map: "fk_incidencia_reporta")
+  usuario_incidencia_resuelta_porTousuario  usuario?                  @relation("incidencia_resuelta_porTousuario", fields: [resuelta_por], references: [id], onUpdate: NoAction, map: "fk_incidencia_resuelve")
+  tipo_incidencia                           tipo_incidencia           @relation(fields: [tipo_incidencia_id], references: [id], onUpdate: NoAction, map: "fk_incidencia_tipo")
+
+  @@index([donacion_id], map: "ix_incidencia_donacion", where: raw("(donacion_id IS NOT NULL)"))
+  @@index([estado, nivel, created_at(sort: Desc)], map: "ix_incidencia_estado")
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model lote_inventario {
+  id                    String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  codigo_lote           String                  @db.VarChar(30)
+  banco_id              String                  @db.Uuid
+  almacen_id            String                  @db.Uuid
+  recepcion_id          String?                 @db.Uuid
+  donacion_item_id      String?                 @db.Uuid
+  tipo_alimento_id      Int                     @db.SmallInt
+  unidad_medida_id      Int                     @db.SmallInt
+  cantidad_inicial      Decimal                 @db.Decimal(12, 2)
+  cantidad_disponible   Decimal                 @db.Decimal(12, 2)
+  peso_inicial_kg       Decimal                 @db.Decimal(12, 2)
+  peso_disponible_kg    Decimal                 @db.Decimal(12, 2)
+  fecha_vencimiento     DateTime?               @db.Date
+  fecha_ingreso         DateTime                @default(now()) @db.Timestamptz(6)
+  estado                estado_lote             @default(DISPONIBLE)
+  created_at            DateTime                @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime                @default(now()) @db.Timestamptz(6)
+  created_by            String?                 @db.Uuid
+  alerta_inventario     alerta_inventario[]
+  distribucion_detalle  distribucion_detalle[]
+  historial_estado      historial_estado[]
+  almacen               almacen                 @relation(fields: [almacen_id], references: [id], onUpdate: NoAction, map: "fk_lote_almacen")
+  banco_alimentos       banco_alimentos         @relation(fields: [banco_id], references: [id], onUpdate: NoAction, map: "fk_lote_banco")
+  usuario               usuario?                @relation(fields: [created_by], references: [id], onUpdate: NoAction, map: "fk_lote_created")
+  donacion_item         donacion_item?          @relation(fields: [donacion_item_id], references: [id], onUpdate: NoAction, map: "fk_lote_item")
+  recepcion_donacion    recepcion_donacion?     @relation(fields: [recepcion_id], references: [id], onUpdate: NoAction, map: "fk_lote_recepcion")
+  tipo_alimento         tipo_alimento           @relation(fields: [tipo_alimento_id], references: [id], onUpdate: NoAction, map: "fk_lote_tipo")
+  unidad_medida         unidad_medida           @relation(fields: [unidad_medida_id], references: [id], onUpdate: NoAction, map: "fk_lote_unidad")
+  movimiento_inventario movimiento_inventario[]
+
+  @@unique([banco_id, codigo_lote], map: "uq_lote_codigo")
+  @@index([almacen_id], map: "ix_lote_almacen")
+  @@index([banco_id, tipo_alimento_id, fecha_vencimiento], map: "ix_lote_fefo", where: raw("((estado = 'DISPONIBLE'::estado_lote) AND (cantidad_disponible > (0)::numeric))"))
+  @@index([fecha_vencimiento], map: "ix_lote_vencimiento", where: raw("(estado = ANY (ARRAY['DISPONIBLE'::estado_lote, 'RESERVADO'::estado_lote]))"))
+  @@schema("public")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model motivo {
+  id                     Int                      @id @default(autoincrement()) @db.SmallInt
+  ambito                 ambito_motivo
+  codigo                 String                   @db.VarChar(40)
+  nombre                 String                   @db.VarChar(120)
+  requiere_comentario    Boolean                  @default(false)
+  activo                 Boolean                  @default(true)
+  created_at             DateTime                 @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime                 @default(now()) @db.Timestamptz(6)
+  asignacion             asignacion[]
+  donacion               donacion[]
+  recepcion_donacion     recepcion_donacion[]
+  ruta                   ruta[]
+  suspension_cuenta      suspension_cuenta[]
+  verificacion_identidad verificacion_identidad[]
+
+  @@unique([ambito, codigo], map: "uq_motivo_ambito_codigo")
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model movimiento_inventario {
+  id                      BigInt                @id @default(autoincrement())
+  lote_id                 String                @db.Uuid
+  tipo                    tipo_movimiento
+  cantidad                Decimal               @db.Decimal(12, 2)
+  peso_kg                 Decimal?              @db.Decimal(12, 2)
+  saldo_cantidad          Decimal               @db.Decimal(12, 2)
+  distribucion_detalle_id String?               @db.Uuid
+  recepcion_id            String?               @db.Uuid
+  motivo                  String?
+  usuario_id              String                @db.Uuid
+  created_at              DateTime              @default(now()) @db.Timestamptz(6)
+  distribucion_detalle    distribucion_detalle? @relation(fields: [distribucion_detalle_id], references: [id], onUpdate: NoAction, map: "fk_movimiento_detalle")
+  lote_inventario         lote_inventario       @relation(fields: [lote_id], references: [id], onUpdate: NoAction, map: "fk_movimiento_lote")
+  recepcion_donacion      recepcion_donacion?   @relation(fields: [recepcion_id], references: [id], onUpdate: NoAction, map: "fk_movimiento_recepcion")
+  usuario                 usuario               @relation(fields: [usuario_id], references: [id], onUpdate: NoAction, map: "fk_movimiento_usuario")
+
+  @@index([created_at], map: "ix_movimiento_fecha", type: Brin)
+  @@index([lote_id, created_at(sort: Desc)], map: "ix_movimiento_lote")
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model notificacion {
+  id                   String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  usuario_id           String             @db.Uuid
+  tipo_notificacion_id Int                @db.SmallInt
+  canal                canal_notificacion @default(PUSH)
+  titulo               String             @db.VarChar(120)
+  cuerpo               String
+  data                 Json?
+  donacion_id          String?            @db.Uuid
+  asignacion_id        String?            @db.Uuid
+  dispositivo_push_id  String?            @db.Uuid
+  estado_envio         estado_envio       @default(PENDIENTE)
+  intentos             Int                @default(0) @db.SmallInt
+  enviada_at           DateTime?          @db.Timestamptz(6)
+  leida_at             DateTime?          @db.Timestamptz(6)
+  error                String?
+  created_at           DateTime           @default(now()) @db.Timestamptz(6)
+  asignacion           asignacion?        @relation(fields: [asignacion_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_notificacion_asignacion")
+  dispositivo_push     dispositivo_push?  @relation(fields: [dispositivo_push_id], references: [id], onUpdate: NoAction, map: "fk_notificacion_dispositivo")
+  donacion             donacion?          @relation(fields: [donacion_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_notificacion_donacion")
+  tipo_notificacion    tipo_notificacion  @relation(fields: [tipo_notificacion_id], references: [id], onUpdate: NoAction, map: "fk_notificacion_tipo")
+  usuario              usuario            @relation(fields: [usuario_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_notificacion_usuario")
+
+  @@index([usuario_id, created_at(sort: Desc)], map: "ix_notificacion_no_leida", where: raw("(leida_at IS NULL)"))
+  @@index([estado_envio, created_at], map: "ix_notificacion_pendiente", where: raw("(estado_envio = 'PENDIENTE'::estado_envio)"))
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model parada_ruta {
+  id                       String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ruta_id                  String                    @db.Uuid
+  orden                    Int                       @db.SmallInt
+  tipo                     tipo_parada
+  donacion_id              String?                   @db.Uuid
+  almacen_id               String?                   @db.Uuid
+  direccion                String                    @db.VarChar(255)
+  ubicacion                Unsupported("geography")
+  estado                   estado_parada             @default(PENDIENTE)
+  hora_estimada_llegada    DateTime?                 @db.Timestamptz(6)
+  hora_real_llegada        DateTime?                 @db.Timestamptz(6)
+  peso_confirmado_kg       Decimal?                  @db.Decimal(10, 2)
+  ubicacion_confirmacion   Unsupported("geography")?
+  precision_confirmacion_m Decimal?                  @db.Decimal(7, 1)
+  confirmacion_manual      Boolean                   @default(false)
+  confirmada_at            DateTime?                 @db.Timestamptz(6)
+  confirmada_por           String?                   @db.Uuid
+  observaciones            String?
+  created_at               DateTime                  @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime                  @default(now()) @db.Timestamptz(6)
+  evidencia                evidencia[]
+  historial_estado         historial_estado[]
+  incidencia               incidencia[]
+  almacen                  almacen?                  @relation(fields: [almacen_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "fk_parada_almacen")
+  usuario                  usuario?                  @relation(fields: [confirmada_por], references: [id], onUpdate: NoAction, map: "fk_parada_confirma")
+  donacion                 donacion?                 @relation(fields: [donacion_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "fk_parada_donacion")
+  ruta                     ruta                      @relation(fields: [ruta_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_parada_ruta")
+  recepcion_donacion       recepcion_donacion[]
+
+  @@unique([ruta_id, donacion_id], map: "uq_parada_donacion")
+  @@unique([ruta_id, orden], map: "uq_parada_orden")
+  @@index([donacion_id], map: "ix_parada_donacion", where: raw("(donacion_id IS NOT NULL)"))
+  @@index([ruta_id, orden], map: "ix_parada_ruta")
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model parametro_sistema {
+  id              Int              @id @default(autoincrement()) @db.SmallInt
+  clave           String           @unique(map: "uq_parametro_global", where: raw("(banco_id IS NULL)")) @db.VarChar(60)
+  valor           String
+  tipo_dato       String           @default("STRING") @db.VarChar(20)
+  descripcion     String?
+  banco_id        String?          @db.Uuid
+  updated_at      DateTime         @default(now()) @db.Timestamptz(6)
+  updated_by      String?          @db.Uuid
+  banco_alimentos banco_alimentos? @relation(fields: [banco_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_parametro_banco")
+  usuario         usuario?         @relation(fields: [updated_by], references: [id], onUpdate: NoAction, map: "fk_parametro_usuario")
+
+  @@unique([clave, banco_id], map: "uq_parametro_banco", where: raw("(banco_id IS NOT NULL)"))
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model recepcion_donacion {
+  id                    String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  donacion_id           String                  @unique(map: "uq_recepcion_donacion") @db.Uuid
+  almacen_id            String                  @db.Uuid
+  parada_id             String?                 @db.Uuid
+  recibida_por          String                  @db.Uuid
+  estado                estado_recepcion        @default(PENDIENTE)
+  peso_recibido_kg      Decimal?                @db.Decimal(10, 2)
+  peso_rechazado_kg     Decimal?                @db.Decimal(10, 2)
+  motivo_id             Int?                    @db.SmallInt
+  observaciones         String?
+  fecha_recepcion       DateTime                @default(now()) @db.Timestamptz(6)
+  created_at            DateTime                @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime                @default(now()) @db.Timestamptz(6)
+  evidencia             evidencia[]
+  incidencia            incidencia[]
+  lote_inventario       lote_inventario[]
+  movimiento_inventario movimiento_inventario[]
+  almacen               almacen                 @relation(fields: [almacen_id], references: [id], onUpdate: NoAction, map: "fk_recepcion_almacen")
+  donacion              donacion                @relation(fields: [donacion_id], references: [id], onUpdate: NoAction, map: "fk_recepcion_donacion")
+  motivo                motivo?                 @relation(fields: [motivo_id], references: [id], onUpdate: NoAction, map: "fk_recepcion_motivo")
+  parada_ruta           parada_ruta?            @relation(fields: [parada_id], references: [id], onUpdate: NoAction, map: "fk_recepcion_parada")
+  usuario               usuario                 @relation(fields: [recibida_por], references: [id], onUpdate: NoAction, map: "fk_recepcion_usuario")
+
+  @@index([almacen_id, fecha_recepcion(sort: Desc)], map: "ix_recepcion_almacen")
+  @@schema("public")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model rol {
+  id          Int           @id @default(autoincrement()) @db.SmallInt
+  codigo      String        @unique(map: "uq_rol_codigo") @db.VarChar(20)
+  nombre      String        @db.VarChar(60)
+  descripcion String?
+  activo      Boolean       @default(true)
+  created_at  DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime      @default(now()) @db.Timestamptz(6)
+  usuario_rol usuario_rol[]
+
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model ruta {
+  id                     String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  codigo                 String                   @unique(map: "uq_ruta_codigo") @db.VarChar(20)
+  voluntario_id          String?                  @db.Uuid
+  banco_ejecutor_id      String?                  @db.Uuid
+  almacen_destino_id     String                   @db.Uuid
+  estado                 estado_ruta              @default(PLANIFICADA)
+  fecha_programada       DateTime                 @db.Date
+  distancia_total_km     Decimal?                 @db.Decimal(8, 2)
+  duracion_estimada_min  Int?
+  duracion_real_min      Int?
+  peso_total_estimado_kg Decimal?                 @db.Decimal(10, 2)
+  geometria              Unsupported("geometry")?
+  proveedor_ruteo        String?                  @db.VarChar(30)
+  iniciada_at            DateTime?                @db.Timestamptz(6)
+  finalizada_at          DateTime?                @db.Timestamptz(6)
+  cancelada_at           DateTime?                @db.Timestamptz(6)
+  motivo_cancelacion_id  Int?                     @db.SmallInt
+  created_at             DateTime                 @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime                 @default(now()) @db.Timestamptz(6)
+  asignacion             asignacion[]
+  historial_estado       historial_estado[]
+  parada_ruta            parada_ruta[]
+  almacen                almacen                  @relation(fields: [almacen_destino_id], references: [id], onUpdate: NoAction, map: "fk_ruta_destino")
+  banco_alimentos        banco_alimentos?         @relation(fields: [banco_ejecutor_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "fk_ruta_ejecutor")
+  motivo                 motivo?                  @relation(fields: [motivo_cancelacion_id], references: [id], onUpdate: NoAction, map: "fk_ruta_motivo")
+  voluntario             voluntario?              @relation(fields: [voluntario_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "fk_ruta_voluntario")
+
+  @@index([estado, fecha_programada], map: "ix_ruta_estado")
+  @@index([voluntario_id, fecha_programada(sort: Desc)], map: "ix_ruta_voluntario")
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model spatial_ref_sys {
+  srid      Int     @id
+  auth_name String? @db.VarChar(256)
+  auth_srid Int?
+  srtext    String? @db.VarChar(2048)
+  proj4text String? @db.VarChar(2048)
+
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model suspension_cuenta {
+  id                                                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  usuario_id                                        String    @unique(map: "uq_suspension_activa", where: raw("((levantada_at IS NULL) AND (fin_at IS NULL))")) @db.Uuid
+  motivo_id                                         Int?      @db.SmallInt
+  descripcion                                       String
+  suspendido_por                                    String    @db.Uuid
+  inicio_at                                         DateTime  @default(now()) @db.Timestamptz(6)
+  fin_at                                            DateTime? @db.Timestamptz(6)
+  levantada_at                                      DateTime? @db.Timestamptz(6)
+  levantada_por                                     String?   @db.Uuid
+  created_at                                        DateTime  @default(now()) @db.Timestamptz(6)
+  usuario_suspension_cuenta_suspendido_porTousuario usuario   @relation("suspension_cuenta_suspendido_porTousuario", fields: [suspendido_por], references: [id], onUpdate: NoAction, map: "fk_suspension_admin")
+  usuario_suspension_cuenta_levantada_porTousuario  usuario?  @relation("suspension_cuenta_levantada_porTousuario", fields: [levantada_por], references: [id], onUpdate: NoAction, map: "fk_suspension_levanta")
+  motivo                                            motivo?   @relation(fields: [motivo_id], references: [id], onUpdate: NoAction, map: "fk_suspension_motivo")
+  usuario_suspension_cuenta_usuario_idTousuario     usuario   @relation("suspension_cuenta_usuario_idTousuario", fields: [usuario_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_suspension_usuario")
+
+  @@schema("public")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model tipo_alimento {
+  id                     Int                   @id @default(autoincrement()) @db.SmallInt
+  categoria_alimento_id  Int                   @db.SmallInt
+  unidad_medida_id       Int                   @db.SmallInt
+  codigo                 String                @unique(map: "uq_tipo_alimento_codigo") @db.VarChar(40)
+  nombre                 String                @db.VarChar(100)
+  requiere_refrigeracion Boolean               @default(false)
+  tipo_almacenamiento    tipo_almacenamiento   @default(SECO)
+  perecedero             Boolean               @default(true)
+  vida_util_dias         Int?                  @db.SmallInt
+  activo                 Boolean               @default(true)
+  created_at             DateTime              @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime              @default(now()) @db.Timestamptz(6)
+  banco_tipo_alimento    banco_tipo_alimento[]
+  donacion_item          donacion_item[]
+  lote_inventario        lote_inventario[]
+  categoria_alimento     categoria_alimento    @relation(fields: [categoria_alimento_id], references: [id], map: "fk_tipo_alimento_categoria")
+  unidad_medida          unidad_medida         @relation(fields: [unidad_medida_id], references: [id], map: "fk_tipo_alimento_unidad")
+
+  @@unique([categoria_alimento_id, nombre], map: "uq_tipo_alimento_nombre")
+  @@index([categoria_alimento_id], map: "ix_tipo_alimento_categoria")
+  @@schema("public")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model tipo_destino_distribucion {
+  id           Int            @id @default(autoincrement()) @db.SmallInt
+  codigo       String         @unique(map: "uq_tipo_destino_codigo") @db.VarChar(30)
+  nombre       String         @db.VarChar(80)
+  activo       Boolean        @default(true)
+  created_at   DateTime       @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime       @default(now()) @db.Timestamptz(6)
+  distribucion distribucion[]
+
+  @@schema("public")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model tipo_incidencia {
+  id                Int          @id @default(autoincrement()) @db.SmallInt
+  codigo            String       @unique(map: "uq_tipo_incidencia_codigo") @db.VarChar(40)
+  nombre            String       @db.VarChar(120)
+  severidad_default severidad    @default(MEDIA)
+  bloquea_donacion  Boolean      @default(false)
+  activo            Boolean      @default(true)
+  created_at        DateTime     @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime     @default(now()) @db.Timestamptz(6)
+  incidencia        incidencia[]
+
+  @@schema("public")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model tipo_notificacion {
+  id               Int                @id @default(autoincrement()) @db.SmallInt
+  codigo           String             @unique(map: "uq_tipo_notificacion_codigo") @db.VarChar(50)
+  nombre           String             @db.VarChar(120)
+  plantilla_titulo String
+  plantilla_cuerpo String
+  canal_default    canal_notificacion @default(PUSH)
+  activo           Boolean            @default(true)
+  created_at       DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime           @default(now()) @db.Timestamptz(6)
+  notificacion     notificacion[]
+
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model tipo_vehiculo {
+  id                      Int          @id @default(autoincrement()) @db.SmallInt
+  codigo                  String       @unique(map: "uq_tipo_vehiculo_codigo") @db.VarChar(30)
+  nombre                  String       @db.VarChar(80)
+  capacidad_referencia_kg Decimal      @db.Decimal(8, 2)
+  permite_refrigeracion   Boolean      @default(false)
+  activo                  Boolean      @default(true)
+  created_at              DateTime     @default(now()) @db.Timestamptz(6)
+  updated_at              DateTime     @default(now()) @db.Timestamptz(6)
+  voluntario              voluntario[]
+
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model unidad_medida {
+  id              Int               @id @default(autoincrement()) @db.SmallInt
+  codigo          String            @unique(map: "uq_unidad_medida_codigo") @db.VarChar(10)
+  nombre          String            @db.VarChar(40)
+  factor_a_kg     Decimal?          @db.Decimal(10, 4)
+  activo          Boolean           @default(true)
+  created_at      DateTime          @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime          @default(now()) @db.Timestamptz(6)
+  donacion_item   donacion_item[]
+  lote_inventario lote_inventario[]
+  tipo_alimento   tipo_alimento[]
+
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model usuario {
+  id                                                                  String                   @id @db.Uuid
+  email                                                               String                   @unique(map: "uq_usuario_email") @db.Citext
+  nombres                                                             String                   @db.VarChar(100)
+  apellidos                                                           String?                  @db.VarChar(100)
+  telefono                                                            String?                  @db.VarChar(20)
+  url_foto                                                            String?
+  estado                                                              estado_usuario           @default(PENDIENTE_CONFIRMACION)
+  email_verificado_at                                                 DateTime?                @db.Timestamptz(6)
+  ultimo_acceso_at                                                    DateTime?                @db.Timestamptz(6)
+  debe_cambiar_password                                               Boolean                  @default(false)
+  idioma                                                              String                   @default("es") @db.VarChar(5)
+  zona_horaria                                                        String                   @default("America/Bogota") @db.VarChar(50)
+  acepto_terminos_at                                                  DateTime?                @db.Timestamptz(6)
+  created_at                                                          DateTime                 @default(now()) @db.Timestamptz(6)
+  updated_at                                                          DateTime                 @default(now()) @db.Timestamptz(6)
+  created_by                                                          String?                  @db.Uuid
+  updated_by                                                          String?                  @db.Uuid
+  deleted_at                                                          DateTime?                @db.Timestamptz(6)
+  alerta_inventario                                                   alerta_inventario[]
+  auditoria                                                           auditoria[]
+  calificacion_calificacion_calificador_idTousuario                   calificacion[]           @relation("calificacion_calificador_idTousuario")
+  calificacion_calificacion_calificado_idTousuario                    calificacion[]           @relation("calificacion_calificado_idTousuario")
+  dispositivo_push                                                    dispositivo_push[]
+  distribucion                                                        distribucion[]
+  donacion_donacion_cancelada_porTousuario                            donacion[]               @relation("donacion_cancelada_porTousuario")
+  donacion_donacion_created_byTousuario                               donacion[]               @relation("donacion_created_byTousuario")
+  donacion_donacion_updated_byTousuario                               donacion[]               @relation("donacion_updated_byTousuario")
+  donante                                                             donante?
+  evidencia                                                           evidencia[]
+  historial_estado                                                    historial_estado[]
+  incidencia_incidencia_asignada_aTousuario                           incidencia[]             @relation("incidencia_asignada_aTousuario")
+  incidencia_incidencia_reportada_porTousuario                        incidencia[]             @relation("incidencia_reportada_porTousuario")
+  incidencia_incidencia_resuelta_porTousuario                         incidencia[]             @relation("incidencia_resuelta_porTousuario")
+  lote_inventario                                                     lote_inventario[]
+  movimiento_inventario                                               movimiento_inventario[]
+  notificacion                                                        notificacion[]
+  parada_ruta                                                         parada_ruta[]
+  parametro_sistema                                                   parametro_sistema[]
+  recepcion_donacion                                                  recepcion_donacion[]
+  suspension_cuenta_suspension_cuenta_suspendido_porTousuario         suspension_cuenta[]      @relation("suspension_cuenta_suspendido_porTousuario")
+  suspension_cuenta_suspension_cuenta_levantada_porTousuario          suspension_cuenta[]      @relation("suspension_cuenta_levantada_porTousuario")
+  suspension_cuenta_suspension_cuenta_usuario_idTousuario             suspension_cuenta?       @relation("suspension_cuenta_usuario_idTousuario")
+  users                                                               users                    @relation(fields: [id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_usuario_auth")
+  usuario_usuario_created_byTousuario                                 usuario?                 @relation("usuario_created_byTousuario", fields: [created_by], references: [id], onUpdate: NoAction, map: "fk_usuario_created_by")
+  other_usuario_usuario_created_byTousuario                           usuario[]                @relation("usuario_created_byTousuario")
+  usuario_usuario_updated_byTousuario                                 usuario?                 @relation("usuario_updated_byTousuario", fields: [updated_by], references: [id], onUpdate: NoAction, map: "fk_usuario_updated_by")
+  other_usuario_usuario_updated_byTousuario                           usuario[]                @relation("usuario_updated_byTousuario")
+  usuario_rol_usuario_rol_asignado_porTousuario                       usuario_rol[]            @relation("usuario_rol_asignado_porTousuario")
+  usuario_rol_usuario_rol_usuario_idTousuario                         usuario_rol[]            @relation("usuario_rol_usuario_idTousuario")
+  verificacion_identidad_verificacion_identidad_revisado_porTousuario verificacion_identidad[] @relation("verificacion_identidad_revisado_porTousuario")
+  verificacion_identidad_verificacion_identidad_usuario_idTousuario   verificacion_identidad?  @relation("verificacion_identidad_usuario_idTousuario")
+  voluntario_voluntario_usuario_idTousuario                           voluntario?              @relation("voluntario_usuario_idTousuario")
+  voluntario_voluntario_verificado_porTousuario                       voluntario[]             @relation("voluntario_verificado_porTousuario")
+
+  @@index([deleted_at], map: "ix_usuario_deleted", where: raw("(deleted_at IS NOT NULL)"))
+  @@index([estado], map: "ix_usuario_estado", where: raw("(deleted_at IS NULL)"))
+  @@schema("public")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model usuario_rol {
+  usuario_id                                String   @db.Uuid
+  rol_id                                    Int      @db.SmallInt
+  asignado_at                               DateTime @default(now()) @db.Timestamptz(6)
+  asignado_por                              String?  @db.Uuid
+  activo                                    Boolean  @default(true)
+  usuario_usuario_rol_asignado_porTousuario usuario? @relation("usuario_rol_asignado_porTousuario", fields: [asignado_por], references: [id], onUpdate: NoAction, map: "fk_usuario_rol_asignado_por")
+  rol                                       rol      @relation(fields: [rol_id], references: [id], onUpdate: NoAction, map: "fk_usuario_rol_rol")
+  usuario_usuario_rol_usuario_idTousuario   usuario  @relation("usuario_rol_usuario_idTousuario", fields: [usuario_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_usuario_rol_usuario")
+
+  @@id([usuario_id, rol_id], map: "pk_usuario_rol")
+  @@index([rol_id], map: "ix_usuario_rol_rol")
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model verificacion_identidad {
+  id                                                   String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  usuario_id                                           String              @unique(map: "uq_verificacion_pendiente", where: raw("(estado = 'PENDIENTE'::estado_verificacion)")) @db.Uuid
+  url_documento_frente                                 String
+  url_documento_reverso                                String?
+  url_selfie                                           String?
+  estado                                               estado_verificacion @default(PENDIENTE)
+  revisado_por                                         String?             @db.Uuid
+  revisado_at                                          DateTime?           @db.Timestamptz(6)
+  motivo_id                                            Int?                @db.SmallInt
+  observacion                                          String?
+  created_at                                           DateTime            @default(now()) @db.Timestamptz(6)
+  updated_at                                           DateTime            @default(now()) @db.Timestamptz(6)
+  motivo                                               motivo?             @relation(fields: [motivo_id], references: [id], onUpdate: NoAction, map: "fk_verificacion_motivo")
+  usuario_verificacion_identidad_revisado_porTousuario usuario?            @relation("verificacion_identidad_revisado_porTousuario", fields: [revisado_por], references: [id], onUpdate: NoAction, map: "fk_verificacion_revisor")
+  usuario_verificacion_identidad_usuario_idTousuario   usuario             @relation("verificacion_identidad_usuario_idTousuario", fields: [usuario_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_verificacion_usuario")
+
+  @@index([estado, created_at], map: "ix_verificacion_estado")
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model voluntario {
+  id                                         String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  usuario_id                                 String                      @unique(map: "uq_voluntario_usuario") @db.Uuid
+  tipo_vehiculo_id                           Int                         @db.SmallInt
+  fecha_nacimiento                           DateTime?                   @db.Date
+  es_grupo                                   Boolean                     @default(false)
+  organizacion                               String?                     @db.VarChar(150)
+  placa_vehiculo                             String                      @unique(map: "uq_voluntario_placa") @db.VarChar(15)
+  url_foto_vehiculo                          String
+  capacidad_carga_kg                         Decimal                     @db.Decimal(8, 2)
+  capacidad_volumen_m3                       Decimal?                    @db.Decimal(6, 2)
+  tiene_refrigeracion                        Boolean                     @default(false)
+  ubicacion_base                             Unsupported("geography")?
+  ultima_ubicacion                           Unsupported("geography")?
+  ultima_ubicacion_at                        DateTime?                   @db.Timestamptz(6)
+  radio_cobertura_km                         Decimal                     @default(10) @db.Decimal(5, 2)
+  disponible                                 Boolean                     @default(false)
+  estado_verificacion                        estado_verificacion         @default(NO_INICIADA)
+  verificado_por                             String?                     @db.Uuid
+  verificado_at                              DateTime?                   @db.Timestamptz(6)
+  total_entregas                             Int                         @default(0)
+  total_kg_transportados                     Decimal                     @default(0) @db.Decimal(12, 2)
+  calificacion_promedio                      Decimal?                    @db.Decimal(3, 2)
+  created_at                                 DateTime                    @default(now()) @db.Timestamptz(6)
+  updated_at                                 DateTime                    @default(now()) @db.Timestamptz(6)
+  deleted_at                                 DateTime?                   @db.Timestamptz(6)
+  asignacion                                 asignacion[]
+  candidato_asignacion                       candidato_asignacion[]
+  ruta                                       ruta[]
+  usuario_voluntario_usuario_idTousuario     usuario                     @relation("voluntario_usuario_idTousuario", fields: [usuario_id], references: [id], onUpdate: NoAction, map: "fk_voluntario_usuario")
+  tipo_vehiculo                              tipo_vehiculo               @relation(fields: [tipo_vehiculo_id], references: [id], onUpdate: NoAction, map: "fk_voluntario_vehiculo")
+  usuario_voluntario_verificado_porTousuario usuario?                    @relation("voluntario_verificado_porTousuario", fields: [verificado_por], references: [id], onUpdate: NoAction, map: "fk_voluntario_verificador")
+  voluntario_disponibilidad                  voluntario_disponibilidad[]
+
+  @@index([disponible, estado_verificacion, capacidad_carga_kg], map: "ix_voluntario_candidato", where: raw("(deleted_at IS NULL)"))
+  @@index([ubicacion_base], map: "ix_voluntario_ubicacion", type: Gist)
+  @@schema("public")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model voluntario_disponibilidad {
+  id            String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  voluntario_id String     @db.Uuid
+  dia_semana    Int        @db.SmallInt
+  hora_inicio   DateTime   @db.Time(6)
+  hora_fin      DateTime   @db.Time(6)
+  activo        Boolean    @default(true)
+  created_at    DateTime   @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime   @default(now()) @db.Timestamptz(6)
+  voluntario    voluntario @relation(fields: [voluntario_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_disponibilidad_voluntario")
+
+  @@unique([voluntario_id, dia_semana, hora_inicio], map: "uq_disponibilidad_franja")
+  @@index([voluntario_id, dia_semana], map: "ix_disponibilidad_voluntario", where: raw("activo"))
+  @@schema("public")
+}
+
+enum ambito_entidad {
+  DONACION
+  ASIGNACION
+  RUTA
+  PARADA
+  INCIDENCIA
+  LOTE
+
+  @@schema("public")
+}
+
+enum ambito_motivo {
+  RECHAZO_ASIGNACION
+  ABANDONO_ASIGNACION
+  CANCELACION_DONACION
+  RECHAZO_RECEPCION
+  RECHAZO_VERIFICACION
+
+  @@schema("public")
+}
+
+enum canal_notificacion {
+  PUSH
+  EMAIL
+  IN_APP
+
+  @@schema("public")
+}
+
+enum estado_asignacion {
+  OFRECIDA
+  ACEPTADA
+  RECHAZADA
+  EXPIRADA
+  ABANDONADA
+  COMPLETADA
+  CANCELADA
+
+  @@schema("public")
+}
+
+enum estado_distribucion {
+  BORRADOR
+  CONFIRMADA
+  ANULADA
+
+  @@schema("public")
+}
+
+enum estado_donacion {
+  BORRADOR
+  PUBLICADA
+  ASIGNADA
+  EN_RECOLECCION
+  EN_TRANSITO
+  ENTREGADA
+  RECIBIDA
+  RECHAZADA
+  CANCELADA
+  EXPIRADA
+
+  @@schema("public")
+}
+
+enum estado_envio {
+  PENDIENTE
+  ENVIADA
+  FALLIDA
+  LEIDA
+
+  @@schema("public")
+}
+
+enum estado_incidencia {
+  ABIERTA
+  EN_REVISION
+  RESUELTA
+  CERRADA
+
+  @@schema("public")
+}
+
+enum estado_lote {
+  DISPONIBLE
+  RESERVADO
+  AGOTADO
+  VENCIDO
+  DESCARTADO
+
+  @@schema("public")
+}
+
+enum estado_parada {
+  PENDIENTE
+  EN_SITIO
+  COMPLETADA
+  FALLIDA
+  OMITIDA
+
+  @@schema("public")
+}
+
+enum estado_recepcion {
+  PENDIENTE
+  ACEPTADA
+  ACEPTADA_PARCIAL
+  RECHAZADA
+
+  @@schema("public")
+}
+
+enum estado_ruta {
+  PLANIFICADA
+  EN_CURSO
+  COMPLETADA
+  CANCELADA
+
+  @@schema("public")
+}
+
+enum estado_usuario {
+  PENDIENTE_CONFIRMACION
+  ACTIVO
+  SUSPENDIDO
+  INACTIVO
+
+  @@schema("public")
+}
+
+enum estado_verificacion {
+  NO_INICIADA
+  PENDIENTE
+  APROBADA
+  RECHAZADA
+
+  @@schema("public")
+}
+
+enum modo_recoleccion {
+  VOLUNTARIO
+  FLOTA_BANCO
+
+  @@schema("public")
+}
+
+enum plataforma_dispositivo {
+  ANDROID
+  IOS
+  WEB
+
+  @@schema("public")
+}
+
+enum severidad {
+  BAJA
+  MEDIA
+  ALTA
+  CRITICA
+
+  @@schema("public")
+}
+
+enum tipo_almacenamiento {
+  SECO
+  REFRIGERADO
+
+  @@schema("public")
+}
+
+enum tipo_evidencia {
+  PUBLICACION
+  RECOGIDA
+  ENTREGA
+  RECEPCION
+  INCIDENCIA
+
+  @@schema("public")
+}
+
+enum tipo_movimiento {
+  ENTRADA
+  SALIDA
+  AJUSTE
+  MERMA
+  VENCIMIENTO
+  DEVOLUCION
+
+  @@schema("public")
+}
+
+enum tipo_parada {
+  RECOGIDA
+  ENTREGA
+
+  @@schema("public")
+}

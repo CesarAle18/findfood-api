@@ -1,9 +1,24 @@
 {
-  "moduleFileExtensions": ["js", "json", "ts"],
-  "rootDir": ".",
+  "moduleFileExtensions": [
+    "js",
+    "json",
+    "ts"
+  ],
+  "rootDir": "..",
+  "roots": [
+    "<rootDir>/test"
+  ],
   "testEnvironment": "node",
   "testRegex": ".e2e-spec.ts$",
   "transform": {
     "^.+\\.(t|j)s$": "ts-jest"
+  },
+  "globalSetup": "<rootDir>/test/configuracion/global-setup.ts",
+  "setupFiles": [
+    "<rootDir>/test/configuracion/entorno.ts"
+  ],
+  "testTimeout": 60000,
+  "moduleNameMapper": {
+    "^(\\.{1,2}/.*)\\.js$": "$1"
   }
 }

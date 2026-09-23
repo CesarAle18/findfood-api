@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # Misma combinación con la que se verificó el DDL v3 (docs/arquitectura.md §14).
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+    env:
+      TEST_ADMIN_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Esperar a PostgreSQL (la imagen reinicia el servidor tras instalar PostGIS)
+        run: |
+          for i in $(seq 1 60); do
+            psql "$TEST_ADMIN_DATABASE_URL" -c 'SELECT 1' >/dev/null 2>&1 && sleep 3 \
+              && psql "$TEST_ADMIN_DATABASE_URL" -c 'SELECT 1' >/dev/null 2>&1 && exit 0
+            sleep 2
+          done
+          exit 1
+
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      # Recrea la base con db/local/simulacion_supabase.sql + supabase/migrations/
+      # e incluye las comprobaciones de RLS y privilegios (P5) sobre el DDL.
+      - run: npm run test:e2e
+      - run: npm run build
