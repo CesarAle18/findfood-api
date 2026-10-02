@@ -35,6 +35,9 @@ const esquema = z
 
     DOCS_HABILITADOS: booleano.optional(),
     TAREAS_HABILITADAS: booleano.default(true),
+    // Solo desarrollo local sin Supabase: URLs de Storage ficticias y todo
+    // archivo se da por subido. Prohibido en producción.
+    STORAGE_SIMULADO: booleano.default(false),
     CORS_ORIGENES: z
       .string()
       .optional()
@@ -48,6 +51,13 @@ const esquema = z
       ),
   })
   .superRefine((c, ctx) => {
+    if (c.NODE_ENV === 'production' && c.STORAGE_SIMULADO) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['STORAGE_SIMULADO'],
+        message: 'no se permite en producción',
+      });
+    }
     if (c.NODE_ENV === 'production' && !c.GOOGLE_MAPS_API_KEY) {
       ctx.addIssue({
         code: 'custom',

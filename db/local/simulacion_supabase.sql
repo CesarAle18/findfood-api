@@ -7,7 +7,16 @@
 --    * los roles anon, authenticated y service_role;
 --    * auth.users (columnas que leen los disparadores) y auth.uid();
 --    * realtime.messages, realtime.topic() y realtime.send().
+--    * PostGIS y pgcrypto en el esquema extensions, y extensions en el
+--      search_path de los roles, como en un proyecto real de Supabase.
 -- ============================================================================
+
+-- Supabase instala las extensiones en "extensions", no en "public". Sin esto,
+-- el local no detecta consultas que dependen de dónde vive PostGIS.
+CREATE SCHEMA IF NOT EXISTS extensions;
+CREATE EXTENSION IF NOT EXISTS postgis WITH SCHEMA extensions;
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
+SET search_path = "$user", public, extensions;
 
 DO $$
 BEGIN
@@ -21,6 +30,14 @@ BEGIN
         CREATE ROLE service_role NOLOGIN BYPASSRLS;
     END IF;
 END $$;
+
+-- Los roles de Supabase traen extensions en su search_path; app_backend no
+-- (lo crea la migración y su search_path lo fija una migración posterior).
+ALTER ROLE postgres SET search_path = "$user", public, extensions;
+ALTER ROLE anon SET search_path = "$user", public, extensions;
+ALTER ROLE authenticated SET search_path = "$user", public, extensions;
+ALTER ROLE service_role SET search_path = "$user", public, extensions;
+GRANT USAGE ON SCHEMA extensions TO anon, authenticated, service_role;
 
 -- Supabase concede estos privilegios de fábrica; el DDL v3 los revoca.
 GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;

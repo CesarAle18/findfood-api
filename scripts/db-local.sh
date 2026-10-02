@@ -33,7 +33,7 @@ preparar_base() {
     local db="$1"
     echo "→ Base $db"
     psql_en postgres -c "DROP DATABASE IF EXISTS $db" >/dev/null
-    psql_en postgres -c "CREATE DATABASE $db" >/dev/null
+    psql_en postgres -c "CREATE DATABASE $db TEMPLATE template0" >/dev/null
     psql_en "$db" --single-transaction < "$RAIZ/db/local/simulacion_supabase.sql" >/dev/null
     for migracion in "$RAIZ"/supabase/migrations/*.sql; do
         echo "  aplicando $(basename "$migracion")"

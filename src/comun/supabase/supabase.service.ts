@@ -35,6 +35,7 @@ export class ErrorSupabase extends Error {
 export class SupabaseService {
   private readonly logger = new Logger(SupabaseService.name);
   private readonly cliente: SupabaseClient;
+  private readonly storageSimulado: boolean;
 
   constructor(config: ConfigApp) {
     this.cliente = createClient(
@@ -42,6 +43,12 @@ export class SupabaseService {
       config.get('SUPABASE_SERVICE_ROLE_KEY'),
       { auth: { persistSession: false, autoRefreshToken: false } },
     );
+    this.storageSimulado = config.get('STORAGE_SIMULADO');
+    if (this.storageSimulado) {
+      this.logger.warn(
+        'STORAGE_SIMULADO: URLs de Storage ficticias (solo desarrollo)',
+      );
+    }
   }
 
   // --- Auth -----------------------------------------------------------------
@@ -96,6 +103,12 @@ export class SupabaseService {
     bucket: Bucket,
     ruta: string,
   ): Promise<{ url: string; token: string }> {
+    if (this.storageSimulado) {
+      return {
+        url: `http://storage.simulado/${bucket}/${ruta}`,
+        token: 'simulado',
+      };
+    }
     const { data, error } = await this.cliente.storage
       .from(bucket)
       .createSignedUploadUrl(ruta);
@@ -110,6 +123,9 @@ export class SupabaseService {
     ruta: string,
     segundos: number,
   ): Promise<string | null> {
+    if (this.storageSimulado) {
+      return `http://storage.simulado/${bucket}/${ruta}?expira=${segundos}`;
+    }
     const { data, error } = await this.cliente.storage
       .from(bucket)
       .createSignedUrl(ruta, segundos);
@@ -124,6 +140,7 @@ export class SupabaseService {
   }
 
   async existeObjeto(bucket: Bucket, ruta: string): Promise<boolean> {
+    if (this.storageSimulado) return true;
     const { data, error } = await this.cliente.storage
       .from(bucket)
       .exists(ruta);

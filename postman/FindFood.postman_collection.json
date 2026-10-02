@@ -1,0 +1,3649 @@
+{
+  "info": {
+    "_postman_id": "e6a39d32-bbba-5efd-9574-178aa0da6ca7",
+    "name": "FindFood API",
+    "description": "Endpoints de la API de FindFood (docs/arquitectura.md §11).\n\nPreparación contra la base local:\n1. `npm run db:local`\n2. `npm run datos:prueba` (crea cuentas, banco, sedes y el environment `postman/FindFood-local.postman_environment.json`; los tokens se firman en cada petición, así que no se guardan ni vencen)\n3. `npm run start:local`\n4. Importa la colección y el environment en Postman y selecciona el environment.\n\nLa carpeta **Sesión (Supabase Auth)** tiene registro, login y OTP contra Supabase; no son endpoints de la API y solo sirven contra el proyecto real.\n\nLas carpetas 0 a 9 siguen el flujo completo y se pueden correr en orden con el Collection Runner: cada petición guarda los ids que necesita la siguiente. La carpeta de alternativas muestra rutas de error y ramas del flujo.\n\nErrores en application/problem+json con un `type` estable.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Tokens de prueba locales: se firman aquí en cada petición (HS256, igual que Supabase)",
+          "// con la clave de .env.local, así el environment no guarda ningún JWT.",
+          "const clave = pm.environment.get('clave_jwt_local');",
+          "if (clave) {",
+          "  const b64url = (palabras) => CryptoJS.enc.Base64.stringify(palabras).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+          "  const json = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+          "  const ahora = Math.floor(Date.now() / 1000);",
+          "  const firmar = (sub) => {",
+          "    const cuerpo = json({ alg: 'HS256', typ: 'JWT' }) + '.' + json({",
+          "      sub, role: 'authenticated', aud: 'authenticated',",
+          "      iss: pm.environment.get('emisor_jwt_local'), iat: ahora, exp: ahora + 3600,",
+          "    });",
+          "    return cuerpo + '.' + b64url(CryptoJS.HmacSHA256(cuerpo, clave));",
+          "  };",
+          "  for (const rol of ['admin', 'asesor', 'donante', 'voluntario', 'solicitante']) {",
+          "    const id = pm.environment.get('id_' + rol);",
+          "    if (id) pm.variables.set('token_' + rol, firmar(id));",
+          "  }",
+          "}",
+          "",
+          "// Fechas relativas al momento de ejecutar (ventana de recogida y vencimientos).",
+          "const minutos = (m) => new Date(Date.now() + m * 60000).toISOString();",
+          "const fechaBogota = (dias) => new Date(Date.now() - 5 * 3600000 + dias * 86400000).toISOString().slice(0, 10);",
+          "pm.variables.set('ventana_inicio', minutos(5));",
+          "pm.variables.set('ventana_fin', minutos(245));",
+          "pm.variables.set('ventana_fin_corta', minutos(185));",
+          "pm.variables.set('fecha_en_3_dias', fechaBogota(3));",
+          "pm.variables.set('fecha_en_90_dias', fechaBogota(90));"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.test('sin error del servidor', () => pm.expect(pm.response.code).to.be.below(500));"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "donacion_id",
+      "value": ""
+    },
+    {
+      "key": "oferta_id",
+      "value": ""
+    },
+    {
+      "key": "ruta_id",
+      "value": ""
+    },
+    {
+      "key": "parada_recogida_id",
+      "value": ""
+    },
+    {
+      "key": "parada_entrega_id",
+      "value": ""
+    },
+    {
+      "key": "foto_ruta",
+      "value": ""
+    },
+    {
+      "key": "lote_id",
+      "value": ""
+    },
+    {
+      "key": "distribucion_id",
+      "value": ""
+    },
+    {
+      "key": "alerta_id",
+      "value": ""
+    },
+    {
+      "key": "otra_donacion_id",
+      "value": ""
+    },
+    {
+      "key": "incidencia_id",
+      "value": ""
+    },
+    {
+      "key": "documento_ruta",
+      "value": ""
+    },
+    {
+      "key": "vehiculo_ruta",
+      "value": ""
+    },
+    {
+      "key": "verificacion_id",
+      "value": ""
+    },
+    {
+      "key": "sede_id",
+      "value": ""
+    },
+    {
+      "key": "supabase_url",
+      "value": "https://mlfesivdmpopsmqfvikq.supabase.co"
+    },
+    {
+      "key": "supabase_anon_key",
+      "value": ""
+    },
+    {
+      "key": "token_sesion",
+      "value": ""
+    },
+    {
+      "key": "refresh_token",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Sesión (Supabase Auth)",
+      "description": "Registro e inicio de sesión. **No son endpoints de la API**: los atiende Supabase Auth, y la API nunca ve contraseñas (docs/arquitectura.md §4).\n\n- Funcionan contra el proyecto real de Supabase, no contra la base local (en local los tokens salen de `npm run datos:prueba`).\n- Completa la variable de colección `supabase_anon_key` (Supabase → Project Settings → API → anon key).\n- Iniciar sesión guarda `token_sesion` y `refresh_token`. Para usar ese token con la API, esta debe correr contra el proyecto real (`npm run start:dev` con `.env`), porque solo así valida los tokens de Supabase.\n- Mientras la base real tenga el esquema v2, la API fallará en casi todo aunque el login funcione. Tampoco envíes `rol` en `data`: el disparador de la v2 lo leería de ahí.",
+      "item": [
+        {
+          "name": "Registro (signUp)",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{supabase_url}}/auth/v1/signup",
+              "host": [
+                "{{supabase_url}}"
+              ],
+              "path": [
+                "auth",
+                "v1",
+                "signup"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"persona@correo.com\",\n  \"password\": \"Clave-segura-123\",\n  \"data\": {\n    \"nombres\": \"Persona\",\n    \"apellidos\": \"De Prueba\",\n    \"telefono\": \"3001234567\",\n    \"acepto_terminos\": true\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Todo registro nace DONANTE. Si el proyecto exige confirmar el correo, la cuenta queda PENDIENTE hasta que la persona abra el enlace; sin teléfono también queda PENDIENTE."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (cuerpo.access_token) {",
+                  "  pm.collectionVariables.set('token_sesion', cuerpo.access_token);",
+                  "  pm.collectionVariables.set('refresh_token', cuerpo.refresh_token);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Iniciar sesión (correo y contraseña)",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{supabase_url}}/auth/v1/token?grant_type=password",
+              "host": [
+                "{{supabase_url}}"
+              ],
+              "path": [
+                "auth",
+                "v1",
+                "token"
+              ],
+              "query": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"persona@correo.com\",\n  \"password\": \"Clave-segura-123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Devuelve access_token (el JWT que se envía a la API como Bearer) y refresh_token. Los guarda en variables de la colección."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (cuerpo.access_token) {",
+                  "  pm.collectionVariables.set('token_sesion', cuerpo.access_token);",
+                  "  pm.collectionVariables.set('refresh_token', cuerpo.refresh_token);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Renovar el token",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{supabase_url}}/auth/v1/token?grant_type=refresh_token",
+              "host": [
+                "{{supabase_url}}"
+              ],
+              "path": [
+                "auth",
+                "v1",
+                "token"
+              ],
+              "query": [
+                {
+                  "key": "grant_type",
+                  "value": "refresh_token"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Cuando vence el access_token (por defecto, 1 hora)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (cuerpo.access_token) {",
+                  "  pm.collectionVariables.set('token_sesion', cuerpo.access_token);",
+                  "  pm.collectionVariables.set('refresh_token', cuerpo.refresh_token);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Pedir código OTP (móvil)",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{supabase_url}}/auth/v1/otp",
+              "host": [
+                "{{supabase_url}}"
+              ],
+              "path": [
+                "auth",
+                "v1",
+                "otp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"persona@correo.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Envía al correo el código de 6 dígitos."
+          }
+        },
+        {
+          "name": "Verificar código OTP",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{supabase_url}}/auth/v1/verify",
+              "host": [
+                "{{supabase_url}}"
+              ],
+              "path": [
+                "auth",
+                "v1",
+                "verify"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"email\",\n  \"email\": \"persona@correo.com\",\n  \"token\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Si el código es correcto, devuelve la sesión y la guarda."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (cuerpo.access_token) {",
+                  "  pm.collectionVariables.set('token_sesion', cuerpo.access_token);",
+                  "  pm.collectionVariables.set('refresh_token', cuerpo.refresh_token);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mi perfil con la sesión iniciada",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_sesion}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/me",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "me"
+              ]
+            },
+            "description": "Primera llamada tras iniciar sesión: roles, estado y pendientes. Requiere la API corriendo contra el proyecto real."
+          }
+        }
+      ]
+    },
+    {
+      "name": "0. Operación y sesión",
+      "item": [
+        {
+          "name": "Salud (público)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('responde 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mi perfil",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/me",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "me"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_donante}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Roles, estado y `pendientes`: la app decide a qué pantalla ir."
+          }
+        },
+        {
+          "name": "Completar perfil",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/me",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "me"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_donante}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"apellidos\": \"Pérez\",\n  \"telefono\": \"300 765 4321\",\n  \"acepto_terminos\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Catálogos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/catalogos",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "catalogos"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_donante}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Tipos de alimento, unidades, vehículos, motivos, tipos de incidencia y destinos."
+          }
+        },
+        {
+          "name": "Registrar dispositivo push",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/me/dispositivos",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "me",
+                "dispositivos"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_donante}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token_push\": \"ExponentPushToken[prueba-donante]\",\n  \"plataforma\": \"ANDROID\",\n  \"modelo\": \"Pixel 8\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "1. Administración del banco",
+      "item": [
+        {
+          "name": "Banco",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/banco",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "banco"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Crear o actualizar banco",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/banco",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "banco"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Banco de Alimentos (local)\",\n  \"direccion\": \"Calle 19 # 32-50\",\n  \"ciudad\": \"Bogotá\",\n  \"ubicacion\": {\n    \"lat\": 4.6097,\n    \"lng\": -74.0817\n  },\n  \"tiene_flota_propia\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Sedes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/almacenes",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "almacenes"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_asesor}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (pm.response.code < 300) pm.collectionVariables.set('sede_id', cuerpo[0]?.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear sede (ADMIN)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/almacenes",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "almacenes"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Sede Sur {{$randomInt}}\",\n  \"direccion\": \"Avenida 1 de Mayo # 30-10\",\n  \"ciudad\": \"Bogotá\",\n  \"ubicacion\": { \"lat\": 4.58, \"lng\": -74.12 },\n  \"horario_disponibilidad\": { \"lunes_a_viernes\": [\"08:00-16:00\"] },\n  \"tipo\": \"SECO\",\n  \"capacidad_kg\": 3000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Activar o desactivar sede",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/almacenes/{{sede_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "almacenes",
+                "{{sede_id}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_asesor}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"activo\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Una sede llena se desactiva para que el motor no le dirija donaciones (§6.6)."
+          }
+        },
+        {
+          "name": "Parámetros",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/parametros",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "parametros"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Cambiar parámetro",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/parametros/ASIGNACION_TIMEOUT_MIN",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "parametros",
+                "ASIGNACION_TIMEOUT_MIN"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"valor\": \"10\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Los PESO_* deben sumar 1: prueba PESO_PROXIMIDAD = 0.5 para ver el 422."
+          }
+        },
+        {
+          "name": "Usuarios",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/usuarios?rol=VOLUNTARIO",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "usuarios"
+              ],
+              "query": [
+                {
+                  "key": "rol",
+                  "value": "VOLUNTARIO"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Nuevo tipo de alimento",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/tipos-alimento",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "tipos-alimento"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"categoria_alimento_id\": 5,\n  \"unidad_medida_id\": {{unidad_kg}},\n  \"codigo\": \"LENTEJA_{{$randomInt}}\",\n  \"nombre\": \"Lenteja {{$randomInt}}\",\n  \"requiere_refrigeracion\": false,\n  \"tipo_almacenamiento\": \"SECO\",\n  \"perecedero\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Salud del reloj (tareas)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/tareas",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "tareas"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Donación: borrador → publicación",
+      "item": [
+        {
+          "name": "Crear borrador",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/donaciones",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "donaciones"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_donante}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"titulo\": \"Excedente de mercado\",\n  \"ventana_recogida_inicio\": \"{{ventana_inicio}}\",\n  \"ventana_recogida_fin\": \"{{ventana_fin}}\",\n  \"direccion_recogida\": \"Calle 63 # 11-40\",\n  \"referencia_recogida\": \"Portería del edificio\",\n  \"ubicacion_recogida\": { \"lat\": 4.6533, \"lng\": -74.0836 },\n  \"items\": [\n    { \"tipo_alimento_id\": {{tipo_arroz}}, \"cantidad\": 6, \"peso_estimado_kg\": 6, \"fecha_vencimiento\": \"{{fecha_en_90_dias}}\" },\n    { \"tipo_alimento_id\": {{tipo_arroz}}, \"cantidad\": 4, \"peso_estimado_kg\": 4, \"descripcion\": \"Arroz integral\" }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (pm.response.code < 300) pm.collectionVariables.set('donacion_id', cuerpo.id);",
+                  "pm.test('responde 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Editar borrador",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/donaciones/{{donacion_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "donaciones",
+                "{{donacion_id}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_donante}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"titulo\": \"Excedente de mercado (actualizado)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Publicar",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/donaciones/{{donacion_id}}/publicar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "donaciones",
+                "{{donacion_id}}",
+                "publicar"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_donante}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Urgencia, sede destino, plazo de 30 min y primera oferta."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('responde 200', () => pm.response.to.have.status(200));",
+                  "pm.test('hay oferta en curso', () => pm.expect(pm.response.json().oferta_en_curso).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mis donaciones",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/donaciones?limite=10",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "donaciones"
+              ],
+              "query": [
+                {
+                  "key": "limite",
+                  "value": "10"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_donante}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "El personal ve todas. Filtros: estado, almacen_id, desde, hasta."
+          }
+        },
+        {
+          "name": "Detalle",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/donaciones/{{donacion_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "donaciones",
+                "{{donacion_id}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_donante}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Candidatos (auditoría del matching)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/donaciones/{{donacion_id}}/candidatos",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "donaciones",
+                "{{donacion_id}}",
+                "candidatos"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_asesor}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Asignación (voluntario)",
+      "item": [
+        {
+          "name": "Mis ofertas",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/asignaciones/ofertas",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "asignaciones",
+                "ofertas"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_voluntario}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (pm.response.code < 300) pm.collectionVariables.set('oferta_id', cuerpo.find((o) => o.donacion_id === pm.collectionVariables.get('donacion_id'))?.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Aceptar oferta",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/asignaciones/{{oferta_id}}/aceptar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "asignaciones",
+                "{{oferta_id}}",
+                "aceptar"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_voluntario}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('responde 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Interruptor de disponibilidad",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/voluntario/estado",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "voluntario",
+                "estado"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_voluntario}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"disponible\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Muestra de ubicación",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/voluntario/ubicacion",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "voluntario",
+                "ubicacion"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_voluntario}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lat\": 4.6541,\n  \"lng\": -74.0829\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Ruta y trabajo en calle",
+      "item": [
+        {
+          "name": "Crear ruta",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/rutas",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "rutas"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_voluntario}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"donacion_ids\": [\"{{donacion_id}}\"], \"origen\": { \"lat\": 4.6553, \"lng\": -74.0816 } }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (pm.response.code < 300) pm.collectionVariables.set('ruta_id', cuerpo.id);",
+                  "if (pm.response.code < 300) pm.collectionVariables.set('parada_recogida_id', cuerpo.paradas[0].id);",
+                  "if (pm.response.code < 300) pm.collectionVariables.set('parada_entrega_id', cuerpo.paradas[cuerpo.paradas.length - 1].id);",
+                  "pm.test('responde 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Detalle de la ruta",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/rutas/{{ruta_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "rutas",
+                "{{ruta_id}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_voluntario}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Mis rutas",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/rutas",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "rutas"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_voluntario}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Iniciar ruta",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/rutas/{{ruta_id}}/iniciar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "rutas",
+                "{{ruta_id}}",
+                "iniciar"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_voluntario}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Llegada a la recogida",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/paradas/{{parada_recogida_id}}/llegada",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "paradas",
+                "{{parada_recogida_id}}",
+                "llegada"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_voluntario}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ubicacion\": {\n    \"lat\": 4.6533,\n    \"lng\": -74.0836\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "URL de subida de foto",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/evidencias/upload-url",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "evidencias",
+                "upload-url"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_voluntario}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"proposito\": \"EVIDENCIA\",\n  \"extension\": \"jpg\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Con STORAGE_SIMULADO la URL es ficticia."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (pm.response.code < 300) pm.collectionVariables.set('foto_ruta', cuerpo.ruta);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Registrar evidencia de recogida",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/evidencias",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "evidencias"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_voluntario}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{$guid}}\",\n  \"tipo\": \"RECOGIDA\",\n  \"ruta\": \"{{foto_ruta}}\",\n  \"parada_id\": \"{{parada_recogida_id}}\",\n  \"capturada_at\": \"{{$isoTimestamp}}\",\n  \"ubicacion\": { \"lat\": 4.6533, \"lng\": -74.0836 },\n  \"precision_m\": 12\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "El id lo genera el móvil: reenviar el mismo es idempotente."
+          }
+        },
+        {
+          "name": "Confirmar recogida",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/paradas/{{parada_recogida_id}}/confirmar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "paradas",
+                "{{parada_recogida_id}}",
+                "confirmar"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_voluntario}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"peso_confirmado_kg\": 9.5,\n  \"ubicacion\": { \"lat\": 4.6533, \"lng\": -74.0836 },\n  \"precision_m\": 12,\n  \"confirmada_en_dispositivo\": \"{{$isoTimestamp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Precisión > 50 m exige `confirmacion_manual: true`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('responde 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Registrar evidencia de entrega",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/evidencias",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "evidencias"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_voluntario}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{$guid}}\",\n  \"tipo\": \"ENTREGA\",\n  \"ruta\": \"{{foto_ruta}}\",\n  \"parada_id\": \"{{parada_entrega_id}}\",\n  \"capturada_at\": \"{{$isoTimestamp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Confirmar entrega (asesor)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/paradas/{{parada_entrega_id}}/confirmar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "paradas",
+                "{{parada_entrega_id}}",
+                "confirmar"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_asesor}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"confirmacion_manual\": true, \"confirmada_en_dispositivo\": \"{{$isoTimestamp}}\" }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('responde 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Evidencias de la parada",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/evidencias?parada_id={{parada_recogida_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "evidencias"
+              ],
+              "query": [
+                {
+                  "key": "parada_id",
+                  "value": "{{parada_recogida_id}}"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_voluntario}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Recepción e inventario",
+      "item": [
+        {
+          "name": "Recibir donación",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/recepciones",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "recepciones"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_asesor}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"donacion_id\": \"{{donacion_id}}\", \"estado\": \"ACEPTADA\", \"observaciones\": \"Todo en buen estado\" }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (pm.response.code < 300) pm.collectionVariables.set('lote_id', cuerpo.lotes[0].id);",
+                  "pm.test('responde 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Recepciones",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/recepciones",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "recepciones"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_asesor}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Inventario FEFO",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/inventario/lotes?tipo_alimento_id={{tipo_arroz}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "inventario",
+                "lotes"
+              ],
+              "query": [
+                {
+                  "key": "tipo_alimento_id",
+                  "value": "{{tipo_arroz}}"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_asesor}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Lote y libro mayor",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/inventario/lotes/{{lote_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "inventario",
+                "lotes",
+                "{{lote_id}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_asesor}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Ajuste de lote",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/inventario/lotes/{{lote_id}}/ajuste",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "inventario",
+                "lotes",
+                "{{lote_id}}",
+                "ajuste"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_asesor}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tipo\": \"MERMA\",\n  \"cantidad\": 0.5,\n  \"motivo\": \"Empaque roto\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "MERMA y VENCIMIENTO descuentan; AJUSTE admite signo."
+          }
+        },
+        {
+          "name": "Crear distribución FEFO",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/distribuciones",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "distribuciones"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_asesor}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tipo_destino_id\": {{destino_comedor}},\n  \"nombre_destino\": \"Comedor comunitario El Paraíso\",\n  \"numero_beneficiarios\": 40,\n  \"lineas\": [{ \"tipo_alimento_id\": {{tipo_arroz}}, \"unidad_medida_id\": {{unidad_kg}}, \"cantidad\": 3 }]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (pm.response.code < 300) pm.collectionVariables.set('distribucion_id', cuerpo.id);",
+                  "pm.test('responde 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Confirmar despacho",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/distribuciones/{{distribucion_id}}/confirmar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "distribuciones",
+                "{{distribucion_id}}",
+                "confirmar"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_asesor}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Distribuciones",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/distribuciones",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "distribuciones"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_asesor}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Alertas abiertas",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/alertas",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "alertas"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_asesor}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (pm.response.code < 300) pm.collectionVariables.set('alerta_id', cuerpo[0]?.id ?? '');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Indicadores",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/kpis/resumen",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "kpis",
+                "resumen"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Por defecto, últimos 30 días (parámetros desde y hasta)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Trazabilidad, calificación y bandeja",
+      "item": [
+        {
+          "name": "Historial de la donación",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/donaciones/{{donacion_id}}/historial",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "donaciones",
+                "{{donacion_id}}",
+                "historial"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_donante}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Donante califica al voluntario",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/asignaciones/{{oferta_id}}/calificacion",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "asignaciones",
+                "{{oferta_id}}",
+                "calificacion"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_donante}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"puntaje\": 5,\n  \"comentario\": \"Muy puntual\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Voluntario califica al donante",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/asignaciones/{{oferta_id}}/calificacion",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "asignaciones",
+                "{{oferta_id}}",
+                "calificacion"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_voluntario}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"puntaje\": 5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Mi impacto",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/me/impacto",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "me",
+                "impacto"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_donante}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Bandeja de notificaciones",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/me/notificaciones?solo_no_leidas=true",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "me",
+                "notificaciones"
+              ],
+              "query": [
+                {
+                  "key": "solo_no_leidas",
+                  "value": "true"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_donante}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Marcar todas como leídas",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/me/notificaciones/leer-todas",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "me",
+                "notificaciones",
+                "leer-todas"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_donante}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Reasignación, cancelación e incidencias",
+      "item": [
+        {
+          "name": "Crear otra donación (leche)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/donaciones",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "donaciones"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_donante}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ventana_recogida_inicio\": \"{{ventana_inicio}}\",\n  \"ventana_recogida_fin\": \"{{ventana_fin_corta}}\",\n  \"direccion_recogida\": \"Carrera 15 # 85-20\",\n  \"ubicacion_recogida\": { \"lat\": 4.667, \"lng\": -74.057 },\n  \"items\": [{ \"tipo_alimento_id\": {{tipo_leche}}, \"cantidad\": 12, \"peso_estimado_kg\": 12, \"fecha_vencimiento\": \"{{fecha_en_3_dias}}\" }]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (pm.response.code < 300) pm.collectionVariables.set('otra_donacion_id', cuerpo.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Publicarla (sede refrigerada)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/donaciones/{{otra_donacion_id}}/publicar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "donaciones",
+                "{{otra_donacion_id}}",
+                "publicar"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_donante}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Reasignar (personal)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/donaciones/{{otra_donacion_id}}/reasignar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "donaciones",
+                "{{otra_donacion_id}}",
+                "reasignar"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_asesor}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"observacion\": \"El voluntario reportó un imprevisto\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Cancelar (dueño o ADMIN)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/donaciones/{{otra_donacion_id}}/cancelar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "donaciones",
+                "{{otra_donacion_id}}",
+                "cancelar"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_donante}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"motivo_id\": {{motivo_cancelacion}} }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Reportar incidencia",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/incidencias",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "incidencias"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_donante}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"tipo_incidencia_id\": {{tipo_incidencia_ausente}}, \"descripcion\": \"El voluntario no llegó\", \"donacion_id\": \"{{otra_donacion_id}}\" }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (pm.response.code < 300) pm.collectionVariables.set('incidencia_id', cuerpo.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Incidencias",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/incidencias",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "incidencias"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_asesor}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Tomar para revisión",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/incidencias/{{incidencia_id}}/revisar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "incidencias",
+                "{{incidencia_id}}",
+                "revisar"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_asesor}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Resolver (ADMIN)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/incidencias/{{incidencia_id}}/resolver",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "incidencias",
+                "{{incidencia_id}}",
+                "resolver"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"resolucion\": \"Se contactó al donante y se reprogramó\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. Solicitud de voluntario y verificación",
+      "item": [
+        {
+          "name": "URL de subida del documento",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/evidencias/upload-url",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "evidencias",
+                "upload-url"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_solicitante}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"proposito\": \"DOCUMENTO_IDENTIDAD\",\n  \"extension\": \"jpg\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (pm.response.code < 300) pm.collectionVariables.set('documento_ruta', cuerpo.ruta);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "URL de subida de la foto del vehículo",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/evidencias/upload-url",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "evidencias",
+                "upload-url"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_solicitante}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"proposito\": \"VEHICULO\",\n  \"extension\": \"jpg\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (pm.response.code < 300) pm.collectionVariables.set('vehiculo_ruta', cuerpo.ruta);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Solicitar ser voluntario",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/voluntario/solicitud",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "voluntario",
+                "solicitud"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_solicitante}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tipo_vehiculo_id\": {{vehiculo_automovil}},\n  \"placa_vehiculo\": \"KZT{{$randomInt}}\",\n  \"url_foto_vehiculo\": \"{{vehiculo_ruta}}\",\n  \"capacidad_carga_kg\": 150,\n  \"tiene_refrigeracion\": false,\n  \"fecha_nacimiento\": \"1995-04-12\",\n  \"ubicacion_base\": { \"lat\": 4.64, \"lng\": -74.07 },\n  \"radio_cobertura_km\": 8,\n  \"documento_frente\": \"{{documento_ruta}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "El rol VOLUNTARIO queda inactivo hasta la aprobación. Si ya se aprobó en una corrida anterior responde 409 ya-es-voluntario (para empezar de cero: npm run db:local:reiniciar && npm run datos:prueba)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (pm.response.code < 300) pm.collectionVariables.set('verificacion_id', cuerpo.verificacion.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Bandeja de verificaciones",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/verificaciones?estado=PENDIENTE",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "verificaciones"
+              ],
+              "query": [
+                {
+                  "key": "estado",
+                  "value": "PENDIENTE"
+                }
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Detalle con documentos (URLs de 60 s)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/verificaciones/{{verificacion_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "verificaciones",
+                "{{verificacion_id}}"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Aprobar",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/verificaciones/{{verificacion_id}}/aprobar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "verificaciones",
+                "{{verificacion_id}}",
+                "aprobar"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Activa el rol VOLUNTARIO por disparador (DDL §17.2)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. Suspensión",
+      "item": [
+        {
+          "name": "Suspender al donante",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/usuarios/{{id_donante}}/suspender",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "usuarios",
+                "{{id_donante}}",
+                "suspender"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"descripcion\": \"Prueba de suspensión\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "El donante recibe 403 cuenta-suspendida",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/me",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "me"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_donante}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('responde 403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reactivar",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/usuarios/{{id_donante}}/reactivar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "usuarios",
+                "{{id_donante}}",
+                "reactivar"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('responde 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Alternativas y errores (no ejecutar en el Runner)",
+      "item": [
+        {
+          "name": "Sin token → 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/me",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "me"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('responde 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rol equivocado → 403",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/parametros",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "parametros"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_donante}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('responde 403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Pesos que no suman 1 → 422",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/parametros/PESO_PROXIMIDAD",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "parametros",
+                "PESO_PROXIMIDAD"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"valor\": \"0.5\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('responde 422', () => pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rechazar oferta",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/asignaciones/{{oferta_id}}/rechazar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "asignaciones",
+                "{{oferta_id}}",
+                "rechazar"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_voluntario}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"motivo_id\": {{motivo_rechazo_asignacion}} }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Ofrece de inmediato al siguiente candidato."
+          }
+        },
+        {
+          "name": "Abandonar tras aceptar",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/asignaciones/{{oferta_id}}/abandonar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "asignaciones",
+                "{{oferta_id}}",
+                "abandonar"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_voluntario}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"motivo_id\": {{motivo_abandono}} }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Republica si la ventana lo permite; si no, expira y abre una incidencia."
+          }
+        },
+        {
+          "name": "Recogida fallida (donante ausente)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/paradas/{{parada_recogida_id}}/fallida",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "paradas",
+                "{{parada_recogida_id}}",
+                "fallida"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_voluntario}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"tipo_incidencia_id\": {{tipo_incidencia_ausente}}, \"descripcion\": \"Nadie abrió en 20 minutos\" }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Cancelar ruta no iniciada",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/rutas/{{ruta_id}}/cancelar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "rutas",
+                "{{ruta_id}}",
+                "cancelar"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_voluntario}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Anular distribución (BORRADOR)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/distribuciones/{{distribucion_id}}/anular",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "distribuciones",
+                "{{distribucion_id}}",
+                "anular"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_asesor}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Atender alerta",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/alertas/{{alerta_id}}/atender",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "alertas",
+                "{{alerta_id}}",
+                "atender"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_asesor}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"accion_tomada\": \"Priorizado para el próximo despacho\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Rechazar verificación",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/verificaciones/{{verificacion_id}}/rechazar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "verificaciones",
+                "{{verificacion_id}}",
+                "rechazar"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"motivo_id\": {{motivo_rechazo_verificacion}}, \"observacion\": \"La foto está borrosa\" }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Franjas de disponibilidad",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/voluntario/disponibilidad",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "voluntario",
+                "disponibilidad"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_voluntario}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"franjas\": [\n    {\n      \"dia_semana\": 0,\n      \"hora_inicio\": \"00:00\",\n      \"hora_fin\": \"23:59\"\n    },\n    {\n      \"dia_semana\": 1,\n      \"hora_inicio\": \"00:00\",\n      \"hora_fin\": \"23:59\"\n    },\n    {\n      \"dia_semana\": 2,\n      \"hora_inicio\": \"00:00\",\n      \"hora_fin\": \"23:59\"\n    },\n    {\n      \"dia_semana\": 3,\n      \"hora_inicio\": \"00:00\",\n      \"hora_fin\": \"23:59\"\n    },\n    {\n      \"dia_semana\": 4,\n      \"hora_inicio\": \"00:00\",\n      \"hora_fin\": \"23:59\"\n    },\n    {\n      \"dia_semana\": 5,\n      \"hora_inicio\": \"00:00\",\n      \"hora_fin\": \"23:59\"\n    },\n    {\n      \"dia_semana\": 6,\n      \"hora_inicio\": \"00:00\",\n      \"hora_fin\": \"23:59\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Hora de Bogotá; reemplaza todas las franjas. 0 = domingo."
+          }
+        },
+        {
+          "name": "Alta de asesor",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/asesores",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "asesores"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"nuevo.asesor@findfood.local\",\n  \"nombres\": \"Nora\",\n  \"telefono\": \"3104445566\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Requiere Supabase Auth real: contra la base local responde 502."
+          }
+        }
+      ]
+    }
+  ]
+}

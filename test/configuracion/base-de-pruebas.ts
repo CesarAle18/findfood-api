@@ -36,7 +36,8 @@ export async function recrearBaseDePruebas(): Promise<void> {
     await servidor.query(
       `DROP DATABASE IF EXISTS ${BASE_PRUEBAS} WITH (FORCE)`,
     );
-    await servidor.query(`CREATE DATABASE ${BASE_PRUEBAS}`);
+    // template0: la imagen postgis instala PostGIS en public de template1.
+    await servidor.query(`CREATE DATABASE ${BASE_PRUEBAS} TEMPLATE template0`);
   } finally {
     await servidor.end();
   }

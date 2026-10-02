@@ -8,6 +8,8 @@ import { ConfigApp, validarConfiguracion } from './configuracion';
     ConfigModule.forRoot({
       isGlobal: true,
       cache: true,
+      // ENV_FILE permite arrancar contra otra base sin tocar .env (npm run start:local).
+      envFilePath: process.env.ENV_FILE ?? '.env',
       validate: validarConfiguracion,
     }),
   ],
