@@ -19,6 +19,24 @@ npm run start:dev            # http://localhost:3000 · OpenAPI en /docs · salu
 
 En local no hay GoTrue. Para crear cuentas, inserta en `auth.users` como `postgres`: los disparadores del DDL crean el perfil. Para firmar tokens, define `SUPABASE_JWT_SECRET` en `.env` y firma JWT HS256 con `iss = <SUPABASE_URL>/auth/v1` y `aud = authenticated`.
 
+## Pruebas manuales con Postman
+
+La colección [`postman/FindFood.postman_collection.json`](postman/FindFood.postman_collection.json) tiene 90 peticiones. Las carpetas 0 a 9 recorren el flujo completo, desde la creación de la donación hasta la recepción, la distribución y la suspensión. Cada petición guarda los ids que necesita la siguiente. La carpeta de alternativas cubre las ramas y los errores.
+
+```bash
+npm run db:local        # base local (la real aún tiene el esquema v2)
+npm run datos:prueba    # cuentas, banco, sedes, .env.local y el environment de Postman
+npm run start:local     # API contra la base local (ENV_FILE=.env.local)
+```
+
+En Postman, importa la colección y `postman/FindFood-local.postman_environment.json`, selecciona el environment **FindFood local** y ejecuta las carpetas en orden (o con el Collection Runner).
+
+- **Cuentas:** `admin`, `asesor`, `donante`, `voluntario` y `solicitante`, todas `@findfood.local`.
+- **Tokens:** no se guardan. El environment tiene los ids de las cuentas y la clave local de `.env.local`, y un script de la colección firma el token de cada cuenta antes de cada petición (Postman bloquea la importación de environments que contienen JWT). `npm run datos:prueba` se puede repetir sin duplicar datos.
+- **Storage simulado:** `.env.local` activa `STORAGE_SIMULADO=true`, así las fotos y evidencias funcionan sin Supabase. La configuración lo rechaza en producción.
+- **Alta de usuario interno:** es la única petición que necesita Supabase Auth real.
+- **Empezar de cero:** `npm run db:local:reiniciar && npm run datos:prueba`.
+
 ## Comandos
 
 | Comando | Qué hace |
@@ -70,7 +88,7 @@ En local no hay GoTrue. Para crear cuentas, inserta en `auth.users` como `postgr
 
 | Ruta | Para qué |
 |---|---|
-| `GET /v1/catalogos` | Tipos de alimento, unidades, vehículos, motivos, tipos de incidencia y destinos para los formularios |
+| `GET /v1/catalogos` | Tipos de alimento, unidades, vehículos, motivos, tipos de incidencia y destinos para los formularios. `?incluir=unidades_medida,motivos` devuelve solo esos catálogos; `?ambito=RECHAZO_ASIGNACION` filtra los motivos. |
 | `GET /v1/me/notificaciones` · `POST …/{id}/leer` · `POST …/leer-todas` | Bandeja dentro de la app (§9.3). Leer una notificación en cola evita su push. |
 | `GET /v1/evidencias?parada_id=…` | Evidencias con URL firmada de 5 min |
 | `POST /v1/donaciones/{id}/reasignar` | ADMIN o ASESOR retiran la asignación y reinician la cascada |
@@ -81,7 +99,7 @@ En local no hay GoTrue. Para crear cuentas, inserta en `auth.users` como `postgr
 | `GET /v1/distribuciones[/{id}]` · `POST …/{id}/anular` | Consulta y anulación de distribuciones |
 | `GET /v1/kpis/resumen` | Indicadores del periodo |
 | `GET/PUT /v1/admin/banco` · `POST/PATCH /v1/admin/tipos-alimento` | Configuración del único banco y del catálogo |
-| `GET /v1/admin/usuarios` · `GET /v1/admin/verificaciones/{id}` · `GET /v1/admin/tareas` | Gestión de cuentas, documentos (URL de 60 s) y salud del reloj (§16) |
+| `POST/GET /v1/admin/usuarios` · `GET /v1/admin/verificaciones/{id}` · `GET /v1/admin/tareas` | Gestión de cuentas, documentos (URL de 60 s) y salud del reloj (§16) |
 
 ## Decisiones de implementación para revisar con el equipo
 
@@ -106,8 +124,15 @@ En local no hay GoTrue. Para crear cuentas, inserta en `auth.users` como `postgr
 7. **Abandono sin margen.** Si la ventana ya no permite otra recogida, la donación pasa a EXPIRADA, se avisa al donante y se abre una incidencia `OTRO`.
 8. **Incidencias.** No cambian estados por sí solas. El personal actúa con cancelar o reasignar. La parada fallida se registra con `/paradas/{id}/fallida`.
 9. **Contraseña temporal.** Se envía por SMTP si `SMTP_URL` está definido. Si no, se devuelve **una sola vez** al ADMIN en la respuesta del alta (pregunta abierta §19.5).
-10. **Suspensión.** Las sesiones se cierran con `ban_duration` en Supabase Auth, y el AuthGuard bloquea desde la siguiente petición.
+10. **Suspensión.** Es indefinida hasta que un ADMIN reactiva la cuenta. Las sesiones se cierran con `ban_duration` en Supabase Auth, y el AuthGuard bloquea desde la siguiente petición.
 11. **Push.** Expo Push, detrás de la interfaz `ProveedorPush`, para poder cambiar a FCM directo (§19.4).
 12. **Observabilidad.** Logs JSON con `nestjs-pino`, con id de petición y de usuario. **Sentry no está integrado:** `@sentry/nestjs` todavía no declara compatibilidad con NestJS 12.
 13. ***Benchmark* de ruteo (§3.2).** En 1 000 instancias de 2 a 5 paradas con la misma matriz, vecino más cercano + 2-opt queda en promedio a **0,23 %** del óptimo, pero el **peor caso llega a 19,4 %**. Si el criterio de "≤ 10 %" se lee por instancia, conviene usar la permutación óptima: con N ≤ 5 son 120 órdenes.
 14. **Pendiente:** alertas de `STOCK_MINIMO` y `CAPACIDAD`. El CHECK de la tabla ya las admite.
+15. **Ajuste al panel web** ([`20261006000000_ajuste_interfaz_web.sql`](supabase/migrations/20261006000000_ajuste_interfaz_web.sql)). Se quitó lo que ninguna interfaz (web ni móvil) permite ver o editar y que ninguna lógica leía:
+    - **Sedes:** sin `temperatura_min/max`, `horario_disponibilidad`, `telefono` ni `ciudad`. Se crean con nombre, dirección, ubicación, régimen y capacidad; se editan nombre, capacidad y estado.
+    - **Banco:** sin `documento_fiscal`, `email`, `telefono`, `capacidad_total_kg`, `radio_operacion_km` ni `horario_recepcion`.
+    - **Suspensión:** sin fecha de fin ni motivo de catálogo (`fin_at`, `motivo_id`), y sin la tarea `levantar_suspensiones`. Basta la descripción.
+    - **Recepción:** el lote toma siempre el vencimiento declarado en el producto (ya no se corrige al recibir).
+    - **Parámetros:** el API solo lista y edita los cuatro `PESO_*` y `MAX_PARADAS_POR_RUTA` (1 a 5). Los demás se fijan en la base.
+    - **Usuarios internos:** `POST /v1/admin/asesores` pasó a `POST /v1/admin/usuarios` con `rol` (`ADMIN` o `ASESOR_BANCO`), como el formulario del panel.

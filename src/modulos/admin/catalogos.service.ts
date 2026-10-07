@@ -9,10 +9,13 @@ import {
 } from '../../comun/http/problema';
 import { PrismaService } from '../../comun/prisma/prisma.service';
 import { TrazabilidadService } from '../../comun/trazabilidad/trazabilidad.service';
-import type {
-  ActualizarTipoAlimentoDto,
-  BancoDto,
-  TipoAlimentoDto,
+import {
+  type ActualizarTipoAlimentoDto,
+  type BancoDto,
+  type Catalogo,
+  CATALOGOS,
+  type FiltroCatalogosDto,
+  type TipoAlimentoDto,
 } from './admin.dto';
 
 @Injectable()
@@ -22,96 +25,98 @@ export class CatalogosService {
     private readonly trazabilidad: TrazabilidadService,
   ) {}
 
-  /** Catálogos activos que necesitan los formularios de la app y del panel. */
-  async todos() {
-    const [
-      categorias,
-      tiposAlimento,
-      unidades,
-      tiposVehiculo,
-      motivos,
-      tiposIncidencia,
-      tiposDestino,
-    ] = await Promise.all([
-      this.prisma.categoria_alimento.findMany({
-        where: { activo: true },
-        orderBy: { nombre: 'asc' },
-        select: {
-          id: true,
-          codigo: true,
-          nombre: true,
-          requiere_refrigeracion: true,
-          vida_util_dias_ref: true,
-        },
-      }),
-      this.prisma.tipo_alimento.findMany({
-        where: { activo: true },
-        orderBy: { nombre: 'asc' },
-        select: {
-          id: true,
-          codigo: true,
-          nombre: true,
-          categoria_alimento_id: true,
-          unidad_medida_id: true,
-          requiere_refrigeracion: true,
-          tipo_almacenamiento: true,
-          perecedero: true,
-          vida_util_dias: true,
-        },
-      }),
-      this.prisma.unidad_medida.findMany({
-        where: { activo: true },
-        orderBy: { id: 'asc' },
-        select: { id: true, codigo: true, nombre: true, factor_a_kg: true },
-      }),
-      this.prisma.tipo_vehiculo.findMany({
-        where: { activo: true },
-        orderBy: { capacidad_referencia_kg: 'asc' },
-        select: {
-          id: true,
-          codigo: true,
-          nombre: true,
-          capacidad_referencia_kg: true,
-          permite_refrigeracion: true,
-        },
-      }),
-      this.prisma.motivo.findMany({
-        where: { activo: true },
-        orderBy: [{ ambito: 'asc' }, { id: 'asc' }],
-        select: {
-          id: true,
-          ambito: true,
-          codigo: true,
-          nombre: true,
-          requiere_comentario: true,
-        },
-      }),
-      this.prisma.tipo_incidencia.findMany({
-        where: { activo: true },
-        orderBy: { id: 'asc' },
-        select: {
-          id: true,
-          codigo: true,
-          nombre: true,
-          severidad_default: true,
-          bloquea_donacion: true,
-        },
-      }),
-      this.prisma.tipo_destino_distribucion.findMany({
-        where: { activo: true },
-        orderBy: { id: 'asc' },
-        select: { id: true, codigo: true, nombre: true },
-      }),
-    ]);
-    return {
-      categorias_alimento: categorias,
-      tipos_alimento: tiposAlimento,
-      unidades_medida: unidades,
-      tipos_vehiculo: tiposVehiculo,
-      motivos,
-      tipos_incidencia: tiposIncidencia,
-      tipos_destino_distribucion: tiposDestino,
+  /**
+   * Catálogos activos que necesitan los formularios de la app y del panel.
+   * Solo consulta los pedidos en `incluir` (por defecto, todos).
+   */
+  async consultar(filtro: FiltroCatalogosDto = {}) {
+    const activo = { activo: true };
+    const consultas: Record<Catalogo, () => Promise<unknown>> = {
+      categorias_alimento: () =>
+        this.prisma.categoria_alimento.findMany({
+          where: activo,
+          orderBy: { nombre: 'asc' },
+          select: {
+            id: true,
+            codigo: true,
+            nombre: true,
+            requiere_refrigeracion: true,
+            vida_util_dias_ref: true,
+          },
+        }),
+      tipos_alimento: () =>
+        this.prisma.tipo_alimento.findMany({
+          where: activo,
+          orderBy: { nombre: 'asc' },
+          select: {
+            id: true,
+            codigo: true,
+            nombre: true,
+            categoria_alimento_id: true,
+            unidad_medida_id: true,
+            requiere_refrigeracion: true,
+            tipo_almacenamiento: true,
+            perecedero: true,
+            vida_util_dias: true,
+          },
+        }),
+      unidades_medida: () =>
+        this.prisma.unidad_medida.findMany({
+          where: activo,
+          orderBy: { id: 'asc' },
+          select: { id: true, codigo: true, nombre: true, factor_a_kg: true },
+        }),
+      tipos_vehiculo: () =>
+        this.prisma.tipo_vehiculo.findMany({
+          where: activo,
+          orderBy: { capacidad_referencia_kg: 'asc' },
+          select: {
+            id: true,
+            codigo: true,
+            nombre: true,
+            capacidad_referencia_kg: true,
+            permite_refrigeracion: true,
+          },
+        }),
+      motivos: () =>
+        this.prisma.motivo.findMany({
+          where: {
+            ...activo,
+            ...(filtro.ambito ? { ambito: filtro.ambito } : {}),
+          },
+          orderBy: [{ ambito: 'asc' }, { id: 'asc' }],
+          select: {
+            id: true,
+            ambito: true,
+            codigo: true,
+            nombre: true,
+            requiere_comentario: true,
+          },
+        }),
+      tipos_incidencia: () =>
+        this.prisma.tipo_incidencia.findMany({
+          where: activo,
+          orderBy: { id: 'asc' },
+          select: {
+            id: true,
+            codigo: true,
+            nombre: true,
+            severidad_default: true,
+            bloquea_donacion: true,
+          },
+        }),
+      tipos_destino_distribucion: () =>
+        this.prisma.tipo_destino_distribucion.findMany({
+          where: activo,
+          orderBy: { id: 'asc' },
+          select: { id: true, codigo: true, nombre: true },
+        }),
     };
+    const pedidos = filtro.incluir?.length
+      ? [...new Set(filtro.incluir)]
+      : CATALOGOS;
+    const resultados = await Promise.all(pedidos.map((c) => consultas[c]()));
+    return Object.fromEntries(pedidos.map((c, i) => [c, resultados[i]]));
   }
 
   async crearTipoAlimento(
@@ -193,8 +198,7 @@ export class CatalogosService {
 
   async banco() {
     const [banco] = await this.prisma.$queryRaw<unknown[]>`
-      SELECT id, nombre, documento_fiscal, direccion, ciudad, telefono, email::text AS email,
-             capacidad_total_kg, radio_operacion_km, tiene_flota_propia, horario_recepcion, activo,
+      SELECT id, nombre, direccion, ciudad, tiene_flota_propia, activo,
              ST_Y(ubicacion::geometry) AS lat, ST_X(ubicacion::geometry) AS lng
         FROM banco_alimentos WHERE deleted_at IS NULL LIMIT 1`;
     if (!banco) throw noEncontrado('Banco de alimentos');
@@ -208,30 +212,19 @@ export class CatalogosService {
         where: { deleted_at: null },
         select: { id: true },
       });
-      const horario = dto.horario_recepcion
-        ? JSON.stringify(dto.horario_recepcion)
-        : null;
       if (actual) {
         await tx.$executeRaw`
           UPDATE banco_alimentos SET
-            nombre = ${dto.nombre}, documento_fiscal = ${dto.documento_fiscal ?? null},
-            direccion = ${dto.direccion}, ciudad = ${dto.ciudad}, ubicacion = ${sqlPunto(dto.ubicacion)},
-            telefono = ${dto.telefono ?? null}, email = ${dto.email ?? null}::citext,
-            capacidad_total_kg = coalesce(${dto.capacidad_total_kg ?? null}::numeric, capacidad_total_kg),
-            radio_operacion_km = ${dto.radio_operacion_km ?? null}::numeric,
-            tiene_flota_propia = coalesce(${dto.tiene_flota_propia ?? null}::boolean, tiene_flota_propia),
-            horario_recepcion = ${horario}::jsonb
+            nombre = ${dto.nombre}, direccion = ${dto.direccion}, ciudad = ${dto.ciudad},
+            ubicacion = ${sqlPunto(dto.ubicacion)},
+            tiene_flota_propia = coalesce(${dto.tiene_flota_propia ?? null}::boolean, tiene_flota_propia)
           WHERE id = ${actual.id}::uuid`;
       } else {
         await tx.$executeRaw`
-          INSERT INTO banco_alimentos
-            (nombre, documento_fiscal, direccion, ciudad, ubicacion, telefono, email,
-             capacidad_total_kg, radio_operacion_km, tiene_flota_propia, horario_recepcion)
+          INSERT INTO banco_alimentos (nombre, direccion, ciudad, ubicacion, tiene_flota_propia)
           VALUES (
-            ${dto.nombre}, ${dto.documento_fiscal ?? null}, ${dto.direccion}, ${dto.ciudad},
-            ${sqlPunto(dto.ubicacion)}, ${dto.telefono ?? null}, ${dto.email ?? null}::citext,
-            ${dto.capacidad_total_kg ?? 0}::numeric, ${dto.radio_operacion_km ?? null}::numeric,
-            ${dto.tiene_flota_propia ?? false}, ${horario}::jsonb)`;
+            ${dto.nombre}, ${dto.direccion}, ${dto.ciudad}, ${sqlPunto(dto.ubicacion)},
+            ${dto.tiene_flota_propia ?? false})`;
       }
       await this.trazabilidad.auditar(tx, {
         usuarioId,

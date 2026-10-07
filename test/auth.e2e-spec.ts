@@ -124,13 +124,14 @@ describe('Autenticación y autorización', () => {
     });
   });
 
-  describe('Asesores y contraseña temporal', () => {
+  describe('Usuarios internos y contraseña temporal', () => {
     it('el alta del admin crea un ASESOR_BANCO que solo puede ver /me hasta cambiar la contraseña', async () => {
       const admin = await ctx.admin();
       const r = await ctx
         .como(admin)
-        .post('/v1/admin/asesores')
+        .post('/v1/admin/usuarios')
         .send({
+          rol: 'ASESOR_BANCO',
           email: 'Asesora@Banco.co',
           nombres: 'Ana',
           telefono: '3109876543',
@@ -165,13 +166,51 @@ describe('Autenticación y autorización', () => {
       await ctx.como(asesor).get('/v1/almacenes').expect(200);
     });
 
+    it('el admin puede crear otro ADMIN con contraseña temporal', async () => {
+      const admin = await ctx.admin();
+      const r = await ctx
+        .como(admin)
+        .post('/v1/admin/usuarios')
+        .send({
+          rol: 'ADMIN',
+          email: 'coordinacion@banco.co',
+          nombres: 'Carlos',
+          telefono: '3101234567',
+        })
+        .expect(201);
+      const nuevo = {
+        id: r.body.id as string,
+        email: r.body.email as string,
+        token: await ctx.token(r.body.id),
+      };
+      const me = await ctx.como(nuevo).get('/v1/me').expect(200);
+      expect(me.body.roles).toEqual(['ADMIN']);
+      expect(me.body.debe_cambiar_password).toBe(true);
+    });
+
+    it('solo crea roles internos: DONANTE y VOLUNTARIO se registran en la app', async () => {
+      const admin = await ctx.admin();
+      const r = await ctx
+        .como(admin)
+        .post('/v1/admin/usuarios')
+        .send({
+          rol: 'DONANTE',
+          email: 'donante@banco.co',
+          nombres: 'Dora',
+          telefono: '3101234567',
+        })
+        .expect(400);
+      expect(r.body.type).toBe('validacion');
+    });
+
     it('un correo ya registrado responde 409', async () => {
       const admin = await ctx.admin();
       const existente = await ctx.cuenta();
       const r = await ctx
         .como(admin)
-        .post('/v1/admin/asesores')
+        .post('/v1/admin/usuarios')
         .send({
+          rol: 'ASESOR_BANCO',
           email: existente.email,
           nombres: 'Otro',
           telefono: '3109876543',
@@ -235,6 +274,19 @@ describe('Autenticación y autorización', () => {
       await ctx.como(donante).get('/v1/me').expect(200);
     });
 
+    it('la suspensión es indefinida: no acepta fecha de fin ni motivo', async () => {
+      const admin = await ctx.admin();
+      const donante = await ctx.cuenta();
+      await ctx
+        .como(admin)
+        .post(`/v1/admin/usuarios/${donante.id}/suspender`)
+        .send({
+          descripcion: 'Uso indebido de la plataforma',
+          fin_at: new Date(Date.now() + 86_400_000).toISOString(),
+        })
+        .expect(400);
+    });
+
     it('el admin no puede suspenderse a sí mismo', async () => {
       const admin = await ctx.admin();
       await ctx
@@ -268,6 +320,64 @@ describe('Autenticación y autorización', () => {
          WHERE n.nspname = 'public' AND p.proname LIKE 'fn\\_%'
            AND has_function_privilege('anon', p.oid, 'EXECUTE')`);
       expect(funciones.rows).toEqual([]);
+    });
+  });
+
+  describe('Catálogos', () => {
+    it('sin filtro devuelve los siete catálogos', async () => {
+      const cuenta = await ctx.cuenta();
+      const r = await ctx.como(cuenta).get('/v1/catalogos').expect(200);
+      expect(Object.keys(r.body).sort()).toEqual([
+        'categorias_alimento',
+        'motivos',
+        'tipos_alimento',
+        'tipos_destino_distribucion',
+        'tipos_incidencia',
+        'tipos_vehiculo',
+        'unidades_medida',
+      ]);
+    });
+
+    it('?incluir= devuelve solo los catálogos pedidos', async () => {
+      const cuenta = await ctx.cuenta();
+      const r = await ctx
+        .como(cuenta)
+        .get('/v1/catalogos?incluir=unidades_medida')
+        .expect(200);
+      expect(Object.keys(r.body)).toEqual(['unidades_medida']);
+      expect(
+        r.body.unidades_medida.map((u: { codigo: string }) => u.codigo),
+      ).toContain('KG');
+
+      const dos = await ctx
+        .como(cuenta)
+        .get('/v1/catalogos?incluir=tipos_vehiculo, motivos')
+        .expect(200);
+      expect(Object.keys(dos.body)).toEqual(['tipos_vehiculo', 'motivos']);
+    });
+
+    it('?ambito= filtra los motivos', async () => {
+      const cuenta = await ctx.cuenta();
+      const r = await ctx
+        .como(cuenta)
+        .get('/v1/catalogos?incluir=motivos&ambito=RECHAZO_ASIGNACION')
+        .expect(200);
+      expect(r.body.motivos.length).toBeGreaterThan(0);
+      expect(
+        r.body.motivos.every(
+          (m: { ambito: string }) => m.ambito === 'RECHAZO_ASIGNACION',
+        ),
+      ).toBe(true);
+    });
+
+    it('un catálogo desconocido responde 400', async () => {
+      const cuenta = await ctx.cuenta();
+      const r = await ctx
+        .como(cuenta)
+        .get('/v1/catalogos?incluir=unidad_medida')
+        .expect(400);
+      expect(r.body.type).toBe('validacion');
+      expect(r.body.errores[0]).toContain('unidades_medida');
     });
   });
 });

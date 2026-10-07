@@ -12,6 +12,14 @@ export const CLAVES_PESO = [
   'PESO_HOLGURA',
 ] as const;
 
+/** Lo que el panel web configura: pesos del puntaje (§6.4) y paradas por ruta. */
+export const CLAVES_EDITABLES = [
+  ...CLAVES_PESO,
+  'MAX_PARADAS_POR_RUTA',
+] as const;
+const PARADAS_MIN = 1;
+const PARADAS_MAX = 5;
+
 interface Parametro {
   clave: string;
   valor: string;
@@ -75,7 +83,7 @@ export class ParametrosService {
 
   listar() {
     return this.prisma.parametro_sistema.findMany({
-      where: { banco_id: null },
+      where: { banco_id: null, clave: { in: [...CLAVES_EDITABLES] } },
       orderBy: { clave: 'asc' },
       select: {
         clave: true,
@@ -88,13 +96,18 @@ export class ParametrosService {
     });
   }
 
-  /** Valida el tipo declarado y que los PESO_* sigan sumando 1 (§6.4). */
+  /**
+   * Solo CLAVES_EDITABLES. Valida el tipo declarado, que los PESO_* sigan
+   * sumando 1 (§6.4) y el rango de MAX_PARADAS_POR_RUTA.
+   */
   async actualizar(
     clave: string,
     valor: string,
     usuarioId: string,
     peticion?: Request,
   ) {
+    if (!(CLAVES_EDITABLES as readonly string[]).includes(clave))
+      throw noEncontrado('Parámetro');
     return this.prisma.transaccion(async (tx: Tx) => {
       const actual = await tx.parametro_sistema.findFirst({
         where: { clave, banco_id: null },
@@ -102,6 +115,16 @@ export class ParametrosService {
       if (!actual) throw noEncontrado('Parámetro');
 
       const normalizado = validarTipo(actual.tipo_dato, valor, clave);
+
+      if (clave === 'MAX_PARADAS_POR_RUTA') {
+        const paradas = Number(normalizado);
+        if (paradas < PARADAS_MIN || paradas > PARADAS_MAX) {
+          throw noProcesable(
+            'paradas-fuera-de-rango',
+            `MAX_PARADAS_POR_RUTA debe estar entre ${PARADAS_MIN} y ${PARADAS_MAX}`,
+          );
+        }
+      }
 
       if ((CLAVES_PESO as readonly string[]).includes(clave)) {
         const pesos = await tx.parametro_sistema.findMany({

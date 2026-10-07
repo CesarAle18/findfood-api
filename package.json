@@ -22,7 +22,9 @@
     "db:local": "scripts/db-local.sh subir",
     "db:local:reiniciar": "scripts/db-local.sh reiniciar",
     "db:pull": "prisma db pull && prisma generate",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start:local": "ENV_FILE=.env.local nest start --watch",
+    "datos:prueba": "node scripts/datos-prueba.mjs"
   },
   "dependencies": {
     "@nestjs/common": "^12.0.1",

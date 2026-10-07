@@ -1,13 +1,12 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
+  ArrayNotEmpty,
+  IsArray,
   IsBoolean,
   IsEmail,
   IsIn,
   IsInt,
-  IsISO8601,
-  IsNumber,
-  IsObject,
   IsOptional,
   IsString,
   Matches,
@@ -20,6 +19,7 @@ import { ROLES } from '../../comun/auth/tipos';
 import { CoordenadaDto } from '../../comun/geo';
 import { EsTelefono, PaginacionDto } from '../../comun/validacion';
 import {
+  ambito_motivo,
   estado_usuario,
   estado_verificacion,
   tipo_almacenamiento,
@@ -28,7 +28,15 @@ import {
 const recortar = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() : value;
 
-export class CrearAsesorDto {
+/** Roles internos que el ADMIN puede crear; donantes y voluntarios se registran en la app. */
+export const ROLES_INTERNOS = ['ADMIN', 'ASESOR_BANCO'] as const;
+export type RolInterno = (typeof ROLES_INTERNOS)[number];
+
+export class CrearUsuarioInternoDto {
+  @ApiProperty({ enum: ROLES_INTERNOS })
+  @IsIn(ROLES_INTERNOS)
+  rol: RolInterno;
+
   @ApiProperty()
   @Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' ? value.trim().toLowerCase() : value,
@@ -69,16 +77,9 @@ export class ListarUsuariosDto extends PaginacionDto {
   rol?: (typeof ROLES)[number];
 }
 
+/** La suspensión es indefinida hasta que un ADMIN reactiva la cuenta. */
 export class SuspenderDto {
   @ApiProperty() @IsString() @MinLength(5) @MaxLength(2000) descripcion: string;
-  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(1) motivo_id?: number;
-
-  @ApiPropertyOptional({
-    description: 'Fin de la suspensión; sin fecha es indefinida',
-  })
-  @IsOptional()
-  @IsISO8601({ strict: true })
-  fin_at?: string;
 }
 
 export class ListarVerificacionesDto extends PaginacionDto {
@@ -112,11 +113,6 @@ export class ActualizarParametroDto {
 
 export class BancoDto {
   @ApiProperty() @IsString() @MinLength(2) @MaxLength(150) nombre: string;
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  @MaxLength(30)
-  documento_fiscal?: string;
   @ApiProperty() @IsString() @MinLength(5) @MaxLength(255) direccion: string;
   @ApiProperty() @IsString() @MaxLength(80) ciudad: string;
 
@@ -125,26 +121,10 @@ export class BancoDto {
   @Type(() => CoordenadaDto)
   ubicacion: CoordenadaDto;
 
-  @ApiPropertyOptional() @IsOptional() @EsTelefono() telefono?: string;
-  @ApiPropertyOptional() @IsOptional() @IsEmail() email?: string;
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  capacidad_total_kg?: number;
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  radio_operacion_km?: number;
   @ApiPropertyOptional()
   @IsOptional()
   @IsBoolean()
   tiene_flota_propia?: boolean;
-  @ApiPropertyOptional() @IsOptional() @IsObject() horario_recepcion?: Record<
-    string,
-    unknown
-  >;
 }
 
 export class TipoAlimentoDto {
@@ -195,4 +175,44 @@ export class ActualizarTipoAlimentoDto {
   @ApiPropertyOptional() @IsOptional() @IsBoolean() perecedero?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsInt() @Min(1) vida_util_dias?: number;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() activo?: boolean;
+}
+
+export const CATALOGOS = [
+  'categorias_alimento',
+  'tipos_alimento',
+  'unidades_medida',
+  'tipos_vehiculo',
+  'motivos',
+  'tipos_incidencia',
+  'tipos_destino_distribucion',
+] as const;
+export type Catalogo = (typeof CATALOGOS)[number];
+
+export class FiltroCatalogosDto {
+  @ApiPropertyOptional({
+    description: `Catálogos a devolver, separados por coma. Por defecto, todos. Valores: ${CATALOGOS.join(', ')}`,
+    example: 'unidades_medida,tipos_alimento',
+  })
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    (Array.isArray(value) ? value : [value])
+      .flatMap((v) => (typeof v === 'string' ? v.split(',') : [v]))
+      .map((v) => (typeof v === 'string' ? v.trim() : v))
+      .filter((v) => v !== ''),
+  )
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsIn(CATALOGOS, {
+    each: true,
+    message: `incluir solo admite: ${CATALOGOS.join(', ')}`,
+  })
+  incluir?: Catalogo[];
+
+  @ApiPropertyOptional({
+    enum: ambito_motivo,
+    description: 'Filtra los motivos por ámbito (p. ej. RECHAZO_ASIGNACION)',
+  })
+  @IsOptional()
+  @IsIn(Object.values(ambito_motivo))
+  ambito?: ambito_motivo;
 }

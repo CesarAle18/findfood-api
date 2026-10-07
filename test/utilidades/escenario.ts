@@ -58,14 +58,9 @@ export async function prepararBanco(
       .send({
         nombre: `Sede ${tipo} ${randomUUID().slice(0, 6)}`,
         direccion: 'Carrera 7 # 10-20',
-        ciudad: 'Bogotá',
         ubicacion: { lat: zona.lat + delta, lng: zona.lng + delta },
-        horario_disponibilidad: { lunes_a_sabado: ['07:00-18:00'] },
         tipo,
         capacidad_kg: 5000,
-        ...(tipo === 'REFRIGERADO'
-          ? { temperatura_min: 0, temperatura_max: 6 }
-          : {}),
       })
       .expect(201);
     return r.body.id as string;

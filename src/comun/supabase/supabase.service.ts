@@ -79,13 +79,11 @@ export class SupabaseService {
   /**
    * Cierra las sesiones: un usuario baneado no puede renovar su refresh token.
    * Los access token vigentes los bloquea el AuthGuard al leer usuario.estado.
+   * El bloqueo es indefinido (~100 años) hasta desbloquearSesiones.
    */
-  async bloquearSesiones(id: string, hasta?: Date): Promise<void> {
-    const horas = hasta
-      ? Math.max(1, Math.ceil((hasta.getTime() - Date.now()) / 3_600_000))
-      : 876_000; // ~100 años: indefinida
+  async bloquearSesiones(id: string): Promise<void> {
     const { error } = await this.cliente.auth.admin.updateUserById(id, {
-      ban_duration: `${horas}h`,
+      ban_duration: '876000h',
     });
     if (error) throw new ErrorSupabase(error.message, error.code, error.status);
   }

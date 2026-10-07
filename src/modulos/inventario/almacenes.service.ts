@@ -37,9 +37,8 @@ export class AlmacenesService {
 
   listar() {
     return this.prisma.$queryRaw`
-      SELECT a.id, a.nombre, a.direccion, a.ciudad, a.telefono, a.tipo::text AS tipo,
-             a.capacidad_kg, a.temperatura_min, a.temperatura_max, a.activo,
-             a.horario_disponibilidad,
+      SELECT a.id, a.nombre, a.direccion, a.tipo::text AS tipo,
+             a.capacidad_kg, a.activo,
              ST_Y(a.ubicacion::geometry) AS lat, ST_X(a.ubicacion::geometry) AS lng,
              coalesce(sum(l.peso_disponible_kg) FILTER (WHERE l.estado IN ('DISPONIBLE','RESERVADO')), 0)
                AS kg_en_inventario
@@ -50,20 +49,14 @@ export class AlmacenesService {
   }
 
   async crear(dto: CrearAlmacenDto, usuarioId: string, peticion?: Request) {
-    this.validarTemperaturas(dto.temperatura_min, dto.temperatura_max);
     const bancoId = await this.bancoId();
     try {
       const id = await this.prisma.transaccion(async (tx) => {
         const [{ id }] = await tx.$queryRaw<{ id: string }[]>`
-          INSERT INTO almacen
-            (banco_id, nombre, direccion, ciudad, ubicacion, telefono, horario_disponibilidad,
-             tipo, capacidad_kg, temperatura_min, temperatura_max)
+          INSERT INTO almacen (banco_id, nombre, direccion, ubicacion, tipo, capacidad_kg)
           VALUES (
-            ${bancoId}::uuid, ${dto.nombre}, ${dto.direccion}, ${dto.ciudad},
-            ${sqlPunto(dto.ubicacion)}, ${dto.telefono ?? null},
-            ${JSON.stringify(dto.horario_disponibilidad)}::jsonb,
-            ${dto.tipo}::tipo_almacenamiento, ${dto.capacidad_kg}::numeric,
-            ${dto.temperatura_min ?? null}::numeric, ${dto.temperatura_max ?? null}::numeric)
+            ${bancoId}::uuid, ${dto.nombre}, ${dto.direccion}, ${sqlPunto(dto.ubicacion)},
+            ${dto.tipo}::tipo_almacenamiento, ${dto.capacidad_kg}::numeric)
           RETURNING id`;
         await this.trazabilidad.auditar(tx, {
           usuarioId,
@@ -95,34 +88,11 @@ export class AlmacenesService {
   ) {
     const actual = await this.prisma.almacen.findUnique({ where: { id } });
     if (!actual) throw noEncontrado('Almacén');
-    this.validarTemperaturas(
-      dto.temperatura_min ??
-        (actual.temperatura_min === null
-          ? undefined
-          : Number(actual.temperatura_min)),
-      dto.temperatura_max ??
-        (actual.temperatura_max === null
-          ? undefined
-          : Number(actual.temperatura_max)),
-    );
     const datos: Prisma.almacenUpdateInput = {
       ...(dto.activo !== undefined ? { activo: dto.activo } : {}),
       ...(dto.nombre !== undefined ? { nombre: dto.nombre } : {}),
-      ...(dto.telefono !== undefined ? { telefono: dto.telefono } : {}),
-      ...(dto.horario_disponibilidad !== undefined
-        ? {
-            horario_disponibilidad:
-              dto.horario_disponibilidad as Prisma.InputJsonValue,
-          }
-        : {}),
       ...(dto.capacidad_kg !== undefined
         ? { capacidad_kg: dto.capacidad_kg }
-        : {}),
-      ...(dto.temperatura_min !== undefined
-        ? { temperatura_min: dto.temperatura_min }
-        : {}),
-      ...(dto.temperatura_max !== undefined
-        ? { temperatura_max: dto.temperatura_max }
         : {}),
     };
     await this.prisma.transaccion(async (tx) => {
@@ -144,19 +114,9 @@ export class AlmacenesService {
     return this.detalle(id);
   }
 
-  private validarTemperaturas(min?: number, max?: number) {
-    if (min !== undefined && max !== undefined && max < min) {
-      throw noProcesable(
-        'temperaturas-invalidas',
-        'temperatura_max debe ser mayor o igual a temperatura_min',
-      );
-    }
-  }
-
   private async detalle(id: string) {
     const [a] = await this.prisma.$queryRaw<unknown[]>`
-      SELECT id, nombre, direccion, ciudad, telefono, tipo::text AS tipo, capacidad_kg,
-             temperatura_min, temperatura_max, activo, horario_disponibilidad,
+      SELECT id, nombre, direccion, tipo::text AS tipo, capacidad_kg, activo,
              ST_Y(ubicacion::geometry) AS lat, ST_X(ubicacion::geometry) AS lng
         FROM almacen WHERE id = ${id}::uuid`;
     return a;

@@ -568,6 +568,78 @@
           }
         },
         {
+          "name": "Catálogos: solo unidades de medida",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_donante}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/catalogos?incluir=unidades_medida",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "catalogos"
+              ],
+              "query": [
+                {
+                  "key": "incluir",
+                  "value": "unidades_medida"
+                }
+              ]
+            },
+            "description": "`incluir` acepta uno o varios catálogos separados por coma: categorias_alimento, tipos_alimento, unidades_medida, tipos_vehiculo, motivos, tipos_incidencia, tipos_destino_distribucion. Sin `incluir` devuelve todos."
+          }
+        },
+        {
+          "name": "Catálogos: motivos de rechazo de una oferta",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_donante}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/catalogos?incluir=motivos&ambito=RECHAZO_ASIGNACION",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "catalogos"
+              ],
+              "query": [
+                {
+                  "key": "incluir",
+                  "value": "motivos"
+                },
+                {
+                  "key": "ambito",
+                  "value": "RECHAZO_ASIGNACION"
+                }
+              ]
+            },
+            "description": "`ambito` filtra los motivos: RECHAZO_ASIGNACION, ABANDONO_ASIGNACION, CANCELACION_DONACION, RECHAZO_RECEPCION o RECHAZO_VERIFICACION."
+          }
+        },
+        {
           "name": "Registrar dispositivo push",
           "request": {
             "method": "POST",
@@ -755,7 +827,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"nombre\": \"Sede Sur {{$randomInt}}\",\n  \"direccion\": \"Avenida 1 de Mayo # 30-10\",\n  \"ciudad\": \"Bogotá\",\n  \"ubicacion\": { \"lat\": 4.58, \"lng\": -74.12 },\n  \"horario_disponibilidad\": { \"lunes_a_viernes\": [\"08:00-16:00\"] },\n  \"tipo\": \"SECO\",\n  \"capacidad_kg\": 3000\n}",
+              "raw": "{\n  \"nombre\": \"Sede Sur {{$randomInt}}\",\n  \"direccion\": \"Avenida 1 de Mayo # 30-10\",\n  \"ubicacion\": { \"lat\": 4.58, \"lng\": -74.12 },\n  \"tipo\": \"SECO\",\n  \"capacidad_kg\": 3000\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -846,7 +918,7 @@
               }
             ],
             "url": {
-              "raw": "{{base_url}}/v1/admin/parametros/ASIGNACION_TIMEOUT_MIN",
+              "raw": "{{base_url}}/v1/admin/parametros/MAX_PARADAS_POR_RUTA",
               "host": [
                 "{{base_url}}"
               ],
@@ -854,7 +926,7 @@
                 "v1",
                 "admin",
                 "parametros",
-                "ASIGNACION_TIMEOUT_MIN"
+                "MAX_PARADAS_POR_RUTA"
               ]
             },
             "auth": {
@@ -869,7 +941,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"valor\": \"10\"\n}",
+              "raw": "{\n  \"valor\": \"5\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3282,6 +3354,60 @@
           ]
         },
         {
+          "name": "Parámetro que la web no configura → 404",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/parametros/ASIGNACION_TIMEOUT_MIN",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "parametros",
+                "ASIGNACION_TIMEOUT_MIN"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"valor\": \"10\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('responde 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Rechazar oferta",
           "request": {
             "method": "POST",
@@ -3601,7 +3727,7 @@
           }
         },
         {
-          "name": "Alta de asesor",
+          "name": "Alta de usuario interno (ADMIN o ASESOR_BANCO)",
           "request": {
             "method": "POST",
             "header": [
@@ -3611,14 +3737,14 @@
               }
             ],
             "url": {
-              "raw": "{{base_url}}/v1/admin/asesores",
+              "raw": "{{base_url}}/v1/admin/usuarios",
               "host": [
                 "{{base_url}}"
               ],
               "path": [
                 "v1",
                 "admin",
-                "asesores"
+                "usuarios"
               ]
             },
             "auth": {
@@ -3633,7 +3759,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"nuevo.asesor@findfood.local\",\n  \"nombres\": \"Nora\",\n  \"telefono\": \"3104445566\"\n}",
+              "raw": "{\n  \"rol\": \"ASESOR_BANCO\",\n  \"email\": \"nuevo.asesor@findfood.local\",\n  \"nombres\": \"Nora\",\n  \"telefono\": \"3104445566\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

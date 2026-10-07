@@ -91,13 +91,6 @@ export class TareasService {
     );
   }
 
-  @Cron(CronExpression.EVERY_5_MINUTES, { name: 'levantar_suspensiones' })
-  levantarSuspensiones() {
-    return this.ejecutar('levantar_suspensiones', () =>
-      this.usuarios.levantarSuspensionesVencidas(),
-    );
-  }
-
   @Cron('0 6 * * *', { name: 'alertas_vencimiento', timeZone: ZONA_HORARIA })
   alertasVencimiento() {
     return this.ejecutar('alertas_vencimiento', () =>

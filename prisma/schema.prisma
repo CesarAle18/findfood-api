@@ -11,16 +11,24 @@ datasource db {
 }
 
 model users {
-  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  email              String?   @db.VarChar(255)
-  encrypted_password String?   @db.VarChar(255)
-  email_confirmed_at DateTime? @db.Timestamptz(6)
-  raw_app_meta_data  Json?
-  raw_user_meta_data Json?
-  banned_until       DateTime? @db.Timestamptz(6)
-  created_at         DateTime? @default(now()) @db.Timestamptz(6)
-  updated_at         DateTime? @default(now()) @db.Timestamptz(6)
-  usuario            usuario?
+  instance_id            String?      @db.Uuid
+  id                     String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  aud                    String?      @db.VarChar(255)
+  role                   String?      @db.VarChar(255)
+  email                  String?      @db.VarChar(255)
+  encrypted_password     String?      @db.VarChar(255)
+  email_confirmed_at     DateTime?    @db.Timestamptz(6)
+  confirmation_token     String?      @db.VarChar(255)
+  recovery_token         String?      @db.VarChar(255)
+  email_change           String?      @db.VarChar(255)
+  email_change_token_new String?      @db.VarChar(255)
+  raw_app_meta_data      Json?
+  raw_user_meta_data     Json?
+  banned_until           DateTime?    @db.Timestamptz(6)
+  created_at             DateTime?    @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime?    @default(now()) @db.Timestamptz(6)
+  identities             identities[]
+  usuario                usuario?
 
   @@schema("auth")
 }
@@ -51,27 +59,22 @@ model alerta_inventario {
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model almacen {
-  id                     String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  banco_id               String                   @db.Uuid
-  nombre                 String                   @db.VarChar(80)
-  direccion              String                   @db.VarChar(255)
-  ciudad                 String                   @db.VarChar(80)
-  ubicacion              Unsupported("geography")
-  telefono               String?                  @db.VarChar(20)
-  horario_disponibilidad Json
-  tipo                   tipo_almacenamiento
-  capacidad_kg           Decimal                  @db.Decimal(12, 2)
-  temperatura_min        Decimal?                 @db.Decimal(4, 1)
-  temperatura_max        Decimal?                 @db.Decimal(4, 1)
-  activo                 Boolean                  @default(true)
-  created_at             DateTime                 @default(now()) @db.Timestamptz(6)
-  updated_at             DateTime                 @default(now()) @db.Timestamptz(6)
-  banco_alimentos        banco_alimentos          @relation(fields: [banco_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_almacen_banco")
-  donacion               donacion[]
-  lote_inventario        lote_inventario[]
-  parada_ruta            parada_ruta[]
-  recepcion_donacion     recepcion_donacion[]
-  ruta                   ruta[]
+  id                 String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  banco_id           String                   @db.Uuid
+  nombre             String                   @db.VarChar(80)
+  direccion          String                   @db.VarChar(255)
+  ubicacion          Unsupported("geography")
+  tipo               tipo_almacenamiento
+  capacidad_kg       Decimal                  @db.Decimal(12, 2)
+  activo             Boolean                  @default(true)
+  created_at         DateTime                 @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime                 @default(now()) @db.Timestamptz(6)
+  banco_alimentos    banco_alimentos          @relation(fields: [banco_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_almacen_banco")
+  donacion           donacion[]
+  lote_inventario    lote_inventario[]
+  parada_ruta        parada_ruta[]
+  recepcion_donacion recepcion_donacion[]
+  ruta               ruta[]
 
   @@unique([banco_id, nombre], map: "uq_almacen_banco_nombre")
   @@index([ubicacion], map: "ix_almacen_ubicacion", type: Gist)
@@ -141,16 +144,10 @@ model auditoria {
 model banco_alimentos {
   id                  String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   nombre              String                   @unique(map: "uq_banco_nombre") @db.VarChar(150)
-  documento_fiscal    String?                  @unique(map: "uq_banco_documento") @db.VarChar(30)
   direccion           String                   @db.VarChar(255)
   ciudad              String                   @db.VarChar(80)
   ubicacion           Unsupported("geography")
-  telefono            String?                  @db.VarChar(20)
-  email               String?                  @db.Citext
-  capacidad_total_kg  Decimal                  @default(0) @db.Decimal(12, 2)
-  radio_operacion_km  Decimal?                 @db.Decimal(6, 2)
   tiene_flota_propia  Boolean                  @default(false)
-  horario_recepcion   Json?
   activo              Boolean                  @default(true)
   created_at          DateTime                 @default(now()) @db.Timestamptz(6)
   updated_at          DateTime                 @default(now()) @db.Timestamptz(6)
@@ -566,7 +563,6 @@ model motivo {
   donacion               donacion[]
   recepcion_donacion     recepcion_donacion[]
   ruta                   ruta[]
-  suspension_cuenta      suspension_cuenta[]
   verificacion_identidad verificacion_identidad[]
 
   @@unique([ambito, codigo], map: "uq_motivo_ambito_codigo")
@@ -764,32 +760,18 @@ model ruta {
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
-model spatial_ref_sys {
-  srid      Int     @id
-  auth_name String? @db.VarChar(256)
-  auth_srid Int?
-  srtext    String? @db.VarChar(2048)
-  proj4text String? @db.VarChar(2048)
-
-  @@schema("public")
-}
-
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model suspension_cuenta {
   id                                                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  usuario_id                                        String    @unique(map: "uq_suspension_activa", where: raw("((levantada_at IS NULL) AND (fin_at IS NULL))")) @db.Uuid
-  motivo_id                                         Int?      @db.SmallInt
+  usuario_id                                        String    @unique(map: "uq_suspension_activa", where: raw("(levantada_at IS NULL)")) @db.Uuid
   descripcion                                       String
   suspendido_por                                    String    @db.Uuid
   inicio_at                                         DateTime  @default(now()) @db.Timestamptz(6)
-  fin_at                                            DateTime? @db.Timestamptz(6)
   levantada_at                                      DateTime? @db.Timestamptz(6)
   levantada_por                                     String?   @db.Uuid
   created_at                                        DateTime  @default(now()) @db.Timestamptz(6)
   usuario_suspension_cuenta_suspendido_porTousuario usuario   @relation("suspension_cuenta_suspendido_porTousuario", fields: [suspendido_por], references: [id], onUpdate: NoAction, map: "fk_suspension_admin")
   usuario_suspension_cuenta_levantada_porTousuario  usuario?  @relation("suspension_cuenta_levantada_porTousuario", fields: [levantada_por], references: [id], onUpdate: NoAction, map: "fk_suspension_levanta")
-  motivo                                            motivo?   @relation(fields: [motivo_id], references: [id], onUpdate: NoAction, map: "fk_suspension_motivo")
   usuario_suspension_cuenta_usuario_idTousuario     usuario   @relation("suspension_cuenta_usuario_idTousuario", fields: [usuario_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_suspension_usuario")
 
   @@schema("public")
@@ -1055,6 +1037,21 @@ model voluntario_disponibilidad {
   @@unique([voluntario_id, dia_semana, hora_inicio], map: "uq_disponibilidad_franja")
   @@index([voluntario_id, dia_semana], map: "ix_disponibilidad_voluntario", where: raw("activo"))
   @@schema("public")
+}
+
+model identities {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id         String    @db.Uuid
+  provider_id     String
+  provider        String
+  identity_data   Json
+  last_sign_in_at DateTime? @db.Timestamptz(6)
+  created_at      DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime? @default(now()) @db.Timestamptz(6)
+  users           users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([provider_id, provider])
+  @@schema("auth")
 }
 
 enum ambito_entidad {

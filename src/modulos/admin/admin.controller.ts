@@ -21,7 +21,8 @@ import {
   ActualizarParametroDto,
   ActualizarTipoAlimentoDto,
   BancoDto,
-  CrearAsesorDto,
+  CrearUsuarioInternoDto,
+  FiltroCatalogosDto,
   ListarUsuariosDto,
   ListarVerificacionesDto,
   RechazarVerificacionDto,
@@ -46,13 +47,14 @@ export class AdminController {
 
   // --- Cuentas ---------------------------------------------------------------
 
-  @Post('asesores')
-  crearAsesor(
+  /** Alta de cuentas internas (ADMIN o ASESOR_BANCO) con contraseña temporal. */
+  @Post('usuarios')
+  crearUsuario(
     @UsuarioActual() admin: UsuarioAutenticado,
-    @Body() dto: CrearAsesorDto,
+    @Body() dto: CrearUsuarioInternoDto,
     @Req() peticion: Request,
   ) {
-    return this.usuarios.crearAsesor(admin, dto, peticion);
+    return this.usuarios.crearUsuarioInterno(admin, dto, peticion);
   }
 
   @Get('usuarios')
@@ -173,8 +175,9 @@ export class AdminController {
 export class CatalogosController {
   constructor(private readonly catalogos: CatalogosService) {}
 
+  /** ?incluir=unidades_medida,tipos_alimento · ?ambito=RECHAZO_ASIGNACION (motivos) */
   @Get()
-  todos() {
-    return this.catalogos.todos();
+  consultar(@Query() filtro: FiltroCatalogosDto) {
+    return this.catalogos.consultar(filtro);
   }
 }

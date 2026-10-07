@@ -419,20 +419,44 @@ describe('Asignación', () => {
       expect(r.body.type).toBe('pesos-no-suman-uno');
       await ctx
         .como(admin)
-        .put('/v1/admin/parametros/ASIGNACION_TIMEOUT_MIN')
-        .send({ valor: 'diez' })
-        .expect(422);
-      await ctx
-        .como(admin)
-        .put('/v1/admin/parametros/RADIO_BUSQUEDA_KM_PASOS')
-        .send({ valor: '[10, 20' })
+        .put('/v1/admin/parametros/MAX_PARADAS_POR_RUTA')
+        .send({ valor: 'cinco' })
         .expect(422);
       const ok = await ctx
         .como(admin)
+        .put('/v1/admin/parametros/MAX_PARADAS_POR_RUTA')
+        .send({ valor: '5' })
+        .expect(200);
+      expect(ok.body.valor).toBe('5');
+    });
+
+    it('limita las paradas por ruta a 1–5', async () => {
+      for (const valor of ['0', '6']) {
+        const r = await ctx
+          .como(admin)
+          .put('/v1/admin/parametros/MAX_PARADAS_POR_RUTA')
+          .send({ valor })
+          .expect(422);
+        expect(r.body.type).toBe('paradas-fuera-de-rango');
+      }
+    });
+
+    it('solo expone lo que configura el panel web', async () => {
+      const lista = await ctx.como(admin).get('/v1/admin/parametros').expect(200);
+      expect(
+        (lista.body as { clave: string }[]).map((p) => p.clave).sort(),
+      ).toEqual([
+        'MAX_PARADAS_POR_RUTA',
+        'PESO_CONFIABILIDAD',
+        'PESO_HOLGURA',
+        'PESO_PROXIMIDAD',
+        'PESO_URGENCIA',
+      ]);
+      await ctx
+        .como(admin)
         .put('/v1/admin/parametros/ASIGNACION_TIMEOUT_MIN')
         .send({ valor: '10' })
-        .expect(200);
-      expect(ok.body.valor).toBe('10');
+        .expect(404);
     });
   });
 });

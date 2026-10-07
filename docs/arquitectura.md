@@ -63,7 +63,7 @@ Este documento describe **cómo se construye** el sistema definido en el antepro
 
 | Módulo | Responsabilidad |
 |---|---|
-| Identidad | Registro móvil como donante (código OTP), alta de asesores por el administrador con contraseña temporal, solicitud y verificación del rol voluntario, suspensión, dispositivos push |
+| Identidad | Registro móvil como donante (código OTP), alta de usuarios internos (ADMIN o asesor) por el administrador con contraseña temporal, solicitud y verificación del rol voluntario, suspensión, dispositivos push |
 | Donaciones | Borrador con productos, publicación, cancelación, historial de estados |
 | Asignación | Filtros duros, puntaje multicriterio, oferta en cascada con plazos, aceptación, rechazo y abandono |
 | Ruteo | Agrupación de recogidas, orden de paradas, confirmación con foto, peso, GPS y hora, modo sin conexión |
@@ -164,7 +164,7 @@ findfood-backend/                      (nombre a elegir)
 │   │   └── supabase/                  cliente con service role: administración de Auth y Storage
 │   └── modulos/
 │       ├── identidad/                 /me, dispositivos, solicitud de voluntario, disponibilidad
-│       ├── admin/                     asesores, verificaciones, suspensiones, parámetros
+│       ├── admin/                     usuarios internos, verificaciones, suspensiones, parámetros
 │       ├── donaciones/                borrador, publicación, cancelación, historial
 │       ├── asignacion/                filtros, puntaje, cascada, aceptar/rechazar/abandonar
 │       ├── ruteo/                     agrupación, vecino más cercano + 2-opt, cliente de Google
@@ -525,10 +525,10 @@ Todas las rutas usan JSON, exigen JWT (salvo las indicadas) y devuelven errores 
 
 | Método y ruta | Roles | Descripción |
 |---|---|---|
-| `POST /v1/admin/asesores` | ADMIN | Crea la cuenta con la API de administración de Supabase: `email_confirm: true`, `app_metadata: { rol: 'ASESOR_BANCO', password_temporal: true }` y `user_metadata` con nombres y teléfono (obligatorio). |
+| `POST /v1/admin/usuarios` | ADMIN | Crea una cuenta interna (`rol`: `ADMIN` o `ASESOR_BANCO`; donantes y voluntarios se registran en la app) con la API de administración de Supabase: `email_confirm: true`, `app_metadata: { rol, password_temporal: true }` y `user_metadata` con nombres y teléfono (obligatorio). |
 | `GET /v1/admin/verificaciones` · `POST …/{id}/aprobar` · `POST …/{id}/rechazar` | ADMIN | Bandeja de verificación. Aprobar activa el rol por disparador (DDL v3, §17.2). Los documentos se ven con URL firmada de 60 s. |
-| `POST /v1/admin/usuarios/{id}/suspender` · `…/reactivar` | ADMIN | `suspension_cuenta` + estado + cierre de sesiones con la API de administración |
-| `GET /v1/admin/parametros` · `PUT /v1/admin/parametros/{clave}` | ADMIN | Valida el tipo y que los `PESO_*` sumen 1 |
+| `POST /v1/admin/usuarios/{id}/suspender` · `…/reactivar` | ADMIN | `suspension_cuenta` + estado + cierre de sesiones con la API de administración. La suspensión es indefinida hasta reactivar (el panel solo activa o inactiva cuentas). |
+| `GET /v1/admin/parametros` · `PUT /v1/admin/parametros/{clave}` | ADMIN | Solo lo que configura el panel: los cuatro `PESO_*` y `MAX_PARADAS_POR_RUTA`. Valida el tipo, que los `PESO_*` sumen 1 y que las paradas estén entre 1 y 5. Los demás parámetros se fijan en la base. |
 
 ### Donaciones y asignación
 
@@ -630,7 +630,7 @@ El DDL v3 (§20) aplica tres barreras independientes:
   |---|---|
   | Registro móvil con correo | Campo **obligatorio** del formulario. Viaja en `user_metadata.telefono` del `signUp`. |
   | Registro móvil con Google | Pantalla de completar perfil, obligatoria antes de operar: `PATCH /v1/me` |
-  | Alta de asesor por el administrador | Campo obligatorio de `POST /v1/admin/asesores` |
+  | Alta de usuario interno por el administrador | Campo obligatorio de `POST /v1/admin/usuarios` |
 
   - La API lo valida en los DTOs: 10 dígitos, con prefijo `+57` opcional, y lo guarda normalizado.
   - En la base de datos la columna `usuario.telefono` admite nulo, porque el registro con Google crea la fila antes de que la persona escriba su teléfono. Pero `ck_usuario_telefono_activo` impide que una cuenta llegue a ACTIVO sin él.
@@ -753,7 +753,7 @@ Errores con Sentry (`@sentry/nestjs`) y logs estructurados en JSON (`nestjs-pino
 | 04 | `notificacion` como bandeja de salida | Supabase Queues (pgmq) | Cola sin prioridades ni DLQ nativas (se resuelven con columnas) |
 | 05 | Realtime *broadcast* privado emitido desde la base | `postgres_changes` con RLS fino | Un disparador más; el esquema del mensaje es un contrato |
 | 06 | RLS activo sin políticas de cliente + rol `app_backend` | RLS "solo como defensa en profundidad" (v2) | Cada tabla nueva necesita su política (verificado en CI) |
-| 07 | Rol interno solo por `app_metadata` | Rol en `user_metadata` (v2) | El alta de asesores depende de la API de administración |
+| 07 | Rol interno solo por `app_metadata` | Rol en `user_metadata` (v2) | El alta de usuarios internos depende de la API de administración |
 | 08 | Google Routes para la operación, con *fallback* geodésico y N acotado. OSRM en contenedor **solo** para *benchmarks* | OSRM como motor de operación | Costo por uso de Google, vigilado en §16. Mantener el contenedor OSRM para las pruebas. |
 | 09 | Posición en vivo por *broadcast* efímero | Tabla de posiciones | Sin historial de recorrido (solo la muestra periódica) |
 | 10 | Sin DELETE para `app_backend` salvo tablas desechables | DELETE general | Correcciones por estado, no por borrado |

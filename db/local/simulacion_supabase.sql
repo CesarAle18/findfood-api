@@ -49,15 +49,35 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authentic
 CREATE SCHEMA IF NOT EXISTS auth;
 
 CREATE TABLE IF NOT EXISTS auth.users (
-    id                 uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-    email              varchar(255),
-    encrypted_password varchar(255),
-    email_confirmed_at timestamptz,
-    raw_app_meta_data  jsonb,
-    raw_user_meta_data jsonb,
-    banned_until       timestamptz,
-    created_at         timestamptz DEFAULT now(),
-    updated_at         timestamptz DEFAULT now()
+    instance_id            uuid,
+    id                     uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    aud                    varchar(255),
+    role                   varchar(255),
+    email                  varchar(255),
+    encrypted_password     varchar(255),
+    email_confirmed_at     timestamptz,
+    confirmation_token     varchar(255),
+    recovery_token         varchar(255),
+    email_change           varchar(255),
+    email_change_token_new varchar(255),
+    raw_app_meta_data      jsonb,
+    raw_user_meta_data     jsonb,
+    banned_until           timestamptz,
+    created_at             timestamptz DEFAULT now(),
+    updated_at             timestamptz DEFAULT now()
+);
+
+-- Identidades por proveedor (GoTrue exige una fila 'email' para iniciar sesión con contraseña).
+CREATE TABLE IF NOT EXISTS auth.identities (
+    id              uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         uuid        NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
+    provider_id     text        NOT NULL,
+    provider        text        NOT NULL,
+    identity_data   jsonb       NOT NULL,
+    last_sign_in_at timestamptz,
+    created_at      timestamptz DEFAULT now(),
+    updated_at      timestamptz DEFAULT now(),
+    UNIQUE (provider_id, provider)
 );
 
 CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid

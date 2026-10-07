@@ -8,11 +8,9 @@ import {
   IsInt,
   IsISO8601,
   IsNumber,
-  IsObject,
   IsOptional,
   IsString,
   IsUUID,
-  Max,
   MaxLength,
   Min,
   MinLength,
@@ -31,39 +29,17 @@ import {
 export class CrearAlmacenDto {
   @ApiProperty() @IsString() @MinLength(2) @MaxLength(80) nombre: string;
   @ApiProperty() @IsString() @MinLength(5) @MaxLength(255) direccion: string;
-  @ApiProperty({ default: 'Bogotá' }) @IsString() @MaxLength(80) ciudad: string;
 
   @ApiProperty({ type: CoordenadaDto })
   @ValidateNested()
   @Type(() => CoordenadaDto)
   ubicacion: CoordenadaDto;
 
-  @ApiPropertyOptional() @IsOptional() @EsTelefono() telefono?: string;
-
-  @ApiProperty({
-    description: 'Franjas por día en que la sede recibe',
-    example: { lunes: ['08:00-17:00'] },
-  })
-  @IsObject()
-  horario_disponibilidad: Record<string, unknown>;
-
   @ApiProperty({ enum: tipo_almacenamiento })
   @IsIn(Object.values(tipo_almacenamiento))
   tipo: tipo_almacenamiento;
 
   @ApiProperty() @IsNumber() @Min(1) capacidad_kg: number;
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsNumber()
-  @Min(-30)
-  @Max(60)
-  temperatura_min?: number;
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsNumber()
-  @Min(-30)
-  @Max(60)
-  temperatura_max?: number;
 }
 
 export class ActualizarAlmacenDto {
@@ -81,28 +57,11 @@ export class ActualizarAlmacenDto {
   @MinLength(2)
   @MaxLength(80)
   nombre?: string;
-  @ApiPropertyOptional() @IsOptional() @EsTelefono() telefono?: string;
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsObject()
-  horario_disponibilidad?: Record<string, unknown>;
   @ApiPropertyOptional()
   @IsOptional()
   @IsNumber()
   @Min(1)
   capacidad_kg?: number;
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsNumber()
-  @Min(-30)
-  @Max(60)
-  temperatura_min?: number;
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsNumber()
-  @Min(-30)
-  @Max(60)
-  temperatura_max?: number;
 }
 
 // --- Recepción ---------------------------------------------------------------
@@ -123,13 +82,6 @@ export class ItemRecibidoDto {
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   peso_aceptado_kg?: number;
-
-  @ApiPropertyOptional({
-    description: 'Corrige la fecha de vencimiento del lote',
-  })
-  @IsOptional()
-  @IsISO8601({ strict: true })
-  fecha_vencimiento?: string;
 }
 
 export const ESTADOS_RECEPCION = [

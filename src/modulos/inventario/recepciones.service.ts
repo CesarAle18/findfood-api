@@ -8,7 +8,6 @@ import {
 } from '../../comun/http/problema';
 import { validarMotivo } from '../../comun/motivos';
 import { PrismaService } from '../../comun/prisma/prisma.service';
-import { fechaSinHora } from '../../comun/tiempo';
 import type { Pagina } from '../../comun/validacion';
 import { DonacionesService } from '../donaciones/donaciones.service';
 import { NotificacionesService } from '../notificaciones/notificaciones.service';
@@ -125,9 +124,7 @@ export class RecepcionesService {
                       ajuste?.peso_aceptado_kg ??
                         Number(i.peso_real_kg ?? i.peso_estimado_kg),
                     ),
-                    fecha: ajuste?.fecha_vencimiento
-                      ? fechaSinHora(ajuste.fecha_vencimiento)
-                      : i.fecha_vencimiento,
+                    fecha: i.fecha_vencimiento,
                   };
                 })
                 .filter((a) => a.cantidad > 0);

@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 FindFood backend: a NestJS 12 modular monolith for a single food bank in Bogotá (donations → volunteer assignment cascade → pickup routes → warehouse reception → FEFO inventory). It runs on Supabase (Postgres 16 + PostGIS, Auth, Storage, Realtime) and deploys to Railway as an always-on process.
 
 - `docs/arquitectura.md` is the design (section numbers like §6.7 below refer to it).
-- `supabase/migrations/` is the schema source of truth: `20260922000000_esquema_inicial.sql` (DDL v3) plus `20260922010000_soporte_api.sql`.
+- `supabase/migrations/` is the schema source of truth: `20260922000000_esquema_inicial.sql` (DDL v3), `20260922010000_soporte_api.sql`, `20261002000000_extensiones_supabase.sql` and `20261006000000_ajuste_interfaz_web.sql` (drops columns no UI exposes).
 - `README.md` lists the implementation decisions that deviate from or extend the doc. Read it before changing behavior.
 - The domain vocabulary is Spanish (tables, enums, modules, DTO fields, error `type`s, comments). Keep new code in Spanish.
 
@@ -23,7 +23,11 @@ npm test -- -t 'FEFO'     # by name; or pass a path
 npm run test:e2e          # needs the db:local server; recreates DB findfood_e2e from the migrations each run
 npm run test:e2e -- test/asignacion   # single e2e file
 npm run db:pull           # prisma db pull + generate (uses PRISMA_INTROSPECCION_URL as postgres)
+npm run datos:prueba      # seeds the local DB, writes .env.local and the Postman environment (tokens)
+npm run start:local       # API against the local DB (ENV_FILE=.env.local, STORAGE_SIMULADO=true)
 ```
+
+- `.env` points at the real Supabase project, which still has the v2 schema. Use `start:local` for manual testing with `postman/FindFood.postman_collection.json`.
 
 - Run tests through the npm scripts. Nest 12 is ESM, so Jest needs `--experimental-vm-modules`.
 - e2e tests run in band against one shared database, and each file uses its own geographic zone so volunteers don't cross-match. Keep that pattern when adding suites.
@@ -36,6 +40,7 @@ npm run db:pull           # prisma db pull + generate (uses PRISMA_INTROSPECCION
 - **Broken 1:1 relations:** Prisma introspects the partial unique indexes as 1:1 relations. `donacion.asignacion`, `usuario.verificacion_identidad_*` and `usuario.suspension_cuenta_*` are wrong: never read or filter through them. Query the child table with explicit filters.
 - **Geography columns** are `Unsupported`, so `prisma.<model>.create` is unavailable for tables with a required geography column. Insert with `$queryRaw`/`$executeRaw` and `sqlPunto()` from `src/comun/geo.ts`, and read coordinates with `ST_Y/ST_X(col::geometry)`.
 - **Privileges:** the API connects as `app_backend`. It has no DELETE except on `candidato_asignacion`, `notificacion`, `dispositivo_push` and `donacion_item`, and no access to the `auth` schema (only through SECURITY DEFINER `fn_*`).
+- **Extensions schema:** on Supabase, PostGIS, citext and pgcrypto live in `extensions`, not `public`. `app_backend` reaches them through its role `search_path` (third migration). The local simulation (`db/local/simulacion_supabase.sql`) reproduces this layout, so a query that only works with PostGIS in `public` fails in the tests too.
 - **Time zone:** sessions are UTC. Use `fechaBogota()` from `src/comun/tiempo.ts` for civil dates and SQL `now()` for deadlines. UTC dates near midnight are a known source of test flakiness.
 
 ## Architecture

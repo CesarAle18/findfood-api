@@ -60,3 +60,6 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 # Cliente de Prisma generado (npm install / npm run db:pull)
 /src/generated
+
+# Environment de Postman con tokens locales (npm run datos:prueba)
+/postman/*.postman_environment.json

@@ -120,8 +120,8 @@ if (!banco.rowCount) {
     ['Sede Centro (refrigerado)', 'REFRIGERADO', { lat: 4.61, lng: -74.08 }],
   ]) {
     await db.query(
-      `INSERT INTO almacen (banco_id, nombre, direccion, ciudad, ubicacion, horario_disponibilidad, tipo, capacidad_kg)
-       VALUES ($1, $2, 'Carrera 7 # 10-20', 'Bogotá', ${punto(p)}, '{"lunes_a_sabado": ["07:00-18:00"]}', $3, 5000)`,
+      `INSERT INTO almacen (banco_id, nombre, direccion, ubicacion, tipo, capacidad_kg)
+       VALUES ($1, $2, 'Carrera 7 # 10-20', ${punto(p)}, $3, 5000)`,
       [rows[0].id, nombre, tipo],
     );
   }

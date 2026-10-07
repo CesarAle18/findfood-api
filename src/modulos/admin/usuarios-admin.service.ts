@@ -18,10 +18,16 @@ import { TrazabilidadService } from '../../comun/trazabilidad/trazabilidad.servi
 import type { Pagina } from '../../comun/validacion';
 import type { Prisma } from '../../generated/prisma/client';
 import type {
-  CrearAsesorDto,
+  CrearUsuarioInternoDto,
   ListarUsuariosDto,
+  RolInterno,
   SuspenderDto,
 } from './admin.dto';
+
+const NOMBRE_ROL: Record<RolInterno, string> = {
+  ADMIN: 'administrador',
+  ASESOR_BANCO: 'asesor del banco de alimentos',
+};
 
 const MINUSCULAS = 'abcdefghijkmnpqrstuvwxyz';
 const MAYUSCULAS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -58,14 +64,14 @@ export class UsuariosAdminService {
   ) {}
 
   /**
-   * Alta de un asesor (§11): la cuenta se crea con la API de administración y
-   * el rol llega por app_metadata (el disparador §16 lo aplica). La contraseña
-   * temporal se envía por correo; sin SMTP configurado se devuelve una sola vez
-   * al administrador.
+   * Alta de una cuenta interna, ADMIN o ASESOR_BANCO (§11): la cuenta se crea
+   * con la API de administración y el rol llega por app_metadata (el disparador
+   * §16 lo aplica). La contraseña temporal se envía por correo; sin SMTP
+   * configurado se devuelve una sola vez al administrador.
    */
-  async crearAsesor(
+  async crearUsuarioInterno(
     admin: UsuarioAutenticado,
-    dto: CrearAsesorDto,
+    dto: CrearUsuarioInternoDto,
     peticion?: Request,
   ) {
     const password = generarPasswordTemporal();
@@ -74,7 +80,7 @@ export class UsuariosAdminService {
       id = await this.supabase.crearUsuario({
         email: dto.email,
         password,
-        appMetadata: { rol: 'ASESOR_BANCO', password_temporal: true },
+        appMetadata: { rol: dto.rol, password_temporal: true },
         userMetadata: {
           nombres: dto.nombres,
           apellidos: dto.apellidos ?? null,
@@ -91,7 +97,7 @@ export class UsuariosAdminService {
           'Ya existe una cuenta con ese correo',
         );
       }
-      this.logger.error({ err }, 'Supabase no creó la cuenta del asesor');
+      this.logger.error({ err }, 'Supabase no creó la cuenta interna');
       throw new Problema(
         502,
         'proveedor-auth-no-disponible',
@@ -109,7 +115,7 @@ export class UsuariosAdminService {
         accion: 'CREAR',
         entidad: 'usuario',
         entidadId: id,
-        nuevos: { email: dto.email, rol: 'ASESOR_BANCO' },
+        nuevos: { email: dto.email, rol: dto.rol },
         peticion,
       });
     });
@@ -120,7 +126,7 @@ export class UsuariosAdminService {
       [
         `Hola ${dto.nombres},`,
         '',
-        'Se creó tu cuenta de asesor del banco de alimentos en FindFood.',
+        `Se creó tu cuenta de ${NOMBRE_ROL[dto.rol]} en FindFood.`,
         `Usuario: ${dto.email}`,
         `Contraseña temporal: ${password}`,
         '',
@@ -216,13 +222,6 @@ export class UsuariosAdminService {
         'auto-suspension',
         'No puedes suspender tu propia cuenta',
       );
-    const fin = dto.fin_at ? new Date(dto.fin_at) : null;
-    if (fin && fin <= new Date()) {
-      throw noProcesable(
-        'fecha-invalida',
-        'La suspensión debe terminar en el futuro',
-      );
-    }
     await this.prisma.transaccion(async (tx) => {
       const usuario = await tx.usuario.findUnique({
         where: { id },
@@ -232,20 +231,11 @@ export class UsuariosAdminService {
       if (usuario.estado === 'SUSPENDIDO') {
         throw conflicto('ya-suspendido', 'La cuenta ya está suspendida');
       }
-      if (dto.motivo_id) {
-        const motivo = await tx.motivo.count({
-          where: { id: dto.motivo_id, activo: true },
-        });
-        if (!motivo)
-          throw noProcesable('motivo-invalido', 'El motivo no existe');
-      }
       await tx.suspension_cuenta.create({
         data: {
           usuario_id: id,
-          motivo_id: dto.motivo_id ?? null,
           descripcion: dto.descripcion,
           suspendido_por: admin.id,
-          fin_at: fin,
         },
       });
       await tx.usuario.update({
@@ -263,23 +253,19 @@ export class UsuariosAdminService {
         entidad: 'usuario',
         entidadId: id,
         anteriores: { estado: usuario.estado },
-        nuevos: {
-          estado: 'SUSPENDIDO',
-          fin_at: fin,
-          descripcion: dto.descripcion,
-        },
+        nuevos: { estado: 'SUSPENDIDO', descripcion: dto.descripcion },
         peticion,
       });
     });
     try {
-      await this.supabase.bloquearSesiones(id, fin ?? undefined);
+      await this.supabase.bloquearSesiones(id);
     } catch (err) {
       this.logger.error(
         { err, usuarioId: id },
         'No se cerraron las sesiones; el AuthGuard ya bloquea el acceso',
       );
     }
-    return { id, estado: 'SUSPENDIDO', fin_at: fin };
+    return { id, estado: 'SUSPENDIDO' };
   }
 
   async reactivar(admin: UsuarioAutenticado, id: string, peticion?: Request) {
@@ -330,34 +316,6 @@ export class UsuariosAdminService {
     return u.telefono && u.email_verificado_at
       ? ('ACTIVO' as const)
       : ('PENDIENTE_CONFIRMACION' as const);
-  }
-
-  /** Tarea periódica: levanta las suspensiones temporales cumplidas. */
-  async levantarSuspensionesVencidas(): Promise<number> {
-    return this.prisma.transaccion(async (tx) => {
-      const vencidas = await tx.$queryRaw<{ usuario_id: string }[]>`
-        UPDATE suspension_cuenta SET levantada_at = now()
-         WHERE levantada_at IS NULL AND fin_at IS NOT NULL AND fin_at <= now()
-        RETURNING usuario_id`;
-      let reactivados = 0;
-      for (const { usuario_id } of vencidas) {
-        const pendiente = await tx.suspension_cuenta.count({
-          where: { usuario_id, levantada_at: null },
-        });
-        if (pendiente) continue;
-        const u = await tx.usuario.findUnique({
-          where: { id: usuario_id },
-          select: { estado: true, telefono: true, email_verificado_at: true },
-        });
-        if (u?.estado !== 'SUSPENDIDO') continue;
-        await tx.usuario.update({
-          where: { id: usuario_id },
-          data: { estado: this.estadoTrasSuspension(u) },
-        });
-        reactivados++;
-      }
-      return reactivados;
-    });
   }
 
   /**
