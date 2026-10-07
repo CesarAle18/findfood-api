@@ -59,6 +59,13 @@ export class CrearUsuarioInternoDto {
   @ApiProperty({ example: '+573001234567' }) @EsTelefono() telefono: string;
 }
 
+/** Activación administrativa; no sustituye suspensión ni confirmación. */
+export class CambiarEstadoUsuarioDto {
+  @ApiProperty({ enum: ['ACTIVO', 'INACTIVO'] })
+  @IsIn(['ACTIVO', 'INACTIVO'])
+  estado: 'ACTIVO' | 'INACTIVO';
+}
+
 export class ListarUsuariosDto extends PaginacionDto {
   @ApiPropertyOptional({ description: 'Busca en correo, nombres y apellidos' })
   @IsOptional()

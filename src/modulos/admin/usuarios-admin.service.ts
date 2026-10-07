@@ -19,6 +19,7 @@ import type { Pagina } from '../../comun/validacion';
 import type { Prisma } from '../../generated/prisma/client';
 import type {
   CrearUsuarioInternoDto,
+  CambiarEstadoUsuarioDto,
   ListarUsuariosDto,
   RolInterno,
   SuspenderDto,
@@ -146,6 +147,74 @@ export class UsuariosAdminService {
       correo_enviado: enviado,
       ...(enviado ? {} : { password_temporal: password }),
     };
+  }
+
+  /** Solo ACTIVO ↔ INACTIVO. AuthGuard comprueba el estado en cada petición. */
+  async cambiarEstado(
+    admin: UsuarioAutenticado,
+    id: string,
+    dto: CambiarEstadoUsuarioDto,
+    peticion?: Request,
+  ) {
+    if (id === admin.id && dto.estado === 'INACTIVO') {
+      throw noProcesable(
+        'auto-inactivacion',
+        'No puedes inactivar tu propia cuenta',
+      );
+    }
+    return this.prisma.transaccion(async (tx) => {
+      const usuario = await tx.usuario.findUnique({
+        where: { id },
+        select: {
+          estado: true,
+          deleted_at: true,
+          telefono: true,
+          email_verificado_at: true,
+        },
+      });
+      if (!usuario || usuario.deleted_at) throw noEncontrado('Usuario');
+      if (usuario.estado !== 'ACTIVO' && usuario.estado !== 'INACTIVO') {
+        throw conflicto(
+          'estado-no-editable',
+          'Solo puedes cambiar cuentas activas o inactivas',
+        );
+      }
+      if (usuario.estado === dto.estado) return { id, estado: usuario.estado };
+      if (
+        dto.estado === 'ACTIVO' &&
+        (!usuario.telefono || !usuario.email_verificado_at)
+      ) {
+        throw noProcesable(
+          'cuenta-sin-confirmar',
+          'La cuenta debe tener teléfono y correo confirmado para activarse',
+        );
+      }
+      const cambio = await tx.usuario.updateMany({
+        where: { id, estado: usuario.estado, deleted_at: null },
+        data: { estado: dto.estado, updated_by: admin.id },
+      });
+      if (cambio.count !== 1)
+        throw conflicto(
+          'estado-modificado',
+          'El estado cambió durante la edición. Actualiza la lista',
+        );
+      if (dto.estado === 'INACTIVO') {
+        await tx.voluntario.updateMany({
+          where: { usuario_id: id },
+          data: { disponible: false },
+        });
+      }
+      await this.trazabilidad.auditar(tx, {
+        usuarioId: admin.id,
+        accion: 'CAMBIAR_ESTADO',
+        entidad: 'usuario',
+        entidadId: id,
+        anteriores: { estado: usuario.estado },
+        nuevos: { estado: dto.estado },
+        peticion,
+      });
+      return { id, estado: dto.estado };
+    });
   }
 
   async listar(filtro: ListarUsuariosDto): Promise<Pagina<unknown>> {

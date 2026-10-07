@@ -22,6 +22,7 @@ import {
   ActualizarTipoAlimentoDto,
   BancoDto,
   CrearUsuarioInternoDto,
+  CambiarEstadoUsuarioDto,
   FiltroCatalogosDto,
   ListarUsuariosDto,
   ListarVerificacionesDto,
@@ -60,6 +61,16 @@ export class AdminController {
   @Get('usuarios')
   listarUsuarios(@Query() filtro: ListarUsuariosDto) {
     return this.usuarios.listar(filtro);
+  }
+
+  @Patch('usuarios/:id/estado')
+  cambiarEstado(
+    @UsuarioActual() admin: UsuarioAutenticado,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CambiarEstadoUsuarioDto,
+    @Req() peticion: Request,
+  ) {
+    return this.usuarios.cambiarEstado(admin, id, dto, peticion);
   }
 
   @Post('usuarios/:id/suspender')
