@@ -347,7 +347,7 @@ describe('Autenticación y autorización', () => {
       expect(Object.keys(r.body)).toEqual(['unidades_medida']);
       expect(
         r.body.unidades_medida.map((u: { codigo: string }) => u.codigo),
-      ).toContain('KG');
+      ).toEqual(expect.arrayContaining(['KG', 'L', 'ML', 'G']));
 
       const dos = await ctx
         .como(cuenta)
