@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 FindFood backend: a NestJS 12 modular monolith for a single food bank in Bogotá (donations → volunteer assignment cascade → pickup routes → warehouse reception → FEFO inventory). It runs on Supabase (Postgres 16 + PostGIS, Auth, Storage, Realtime) and deploys to Railway as an always-on process.
 
 - `docs/arquitectura.md` is the design (section numbers like §6.7 below refer to it).
-- `supabase/migrations/` is the schema source of truth: `20260922000000_esquema_inicial.sql` (DDL v3), `20260922010000_soporte_api.sql`, `20261002000000_extensiones_supabase.sql` and `20261006000000_ajuste_interfaz_web.sql` (drops columns no UI exposes).
+- `supabase/migrations/` is the schema source of truth: `20260922000000_esquema_inicial.sql` (DDL v3), `20260922010000_soporte_api.sql`, `20261002000000_extensiones_supabase.sql`, `20261006000000_ajuste_interfaz_web.sql` (drops columns no UI exposes) and `20261009000000_unidades_ml_g.sql` (adds the ML and G units the mobile app offers).
 - `README.md` lists the implementation decisions that deviate from or extend the doc. Read it before changing behavior.
 - The domain vocabulary is Spanish (tables, enums, modules, DTO fields, error `type`s, comments). Keep new code in Spanish.
 
