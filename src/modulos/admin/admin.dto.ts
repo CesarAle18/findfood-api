@@ -2,6 +2,8 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
   ArrayNotEmpty,
+  ArrayMinSize,
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsEmail,
@@ -15,6 +17,7 @@ import {
   MinLength,
   ValidateNested,
 } from 'class-validator';
+import { CLAVES_EDITABLES } from '../parametros/parametros.service';
 import { ROLES } from '../../comun/auth/tipos';
 import { CoordenadaDto } from '../../comun/geo';
 import { EsTelefono, PaginacionDto } from '../../comun/validacion';
@@ -116,6 +119,28 @@ export class ActualizarParametroDto {
   @IsString()
   @MaxLength(2000)
   valor: string;
+}
+
+export class CambioParametroDto {
+  @ApiProperty({ enum: CLAVES_EDITABLES })
+  @IsIn(CLAVES_EDITABLES)
+  clave: string;
+
+  @ApiProperty()
+  @IsString()
+  @MaxLength(2000)
+  valor: string;
+}
+
+/** Guarda los cuatro pesos y el límite de paradas como una unidad. */
+export class ActualizarParametrosDto {
+  @ApiProperty({ type: [CambioParametroDto], minItems: 5, maxItems: 5 })
+  @IsArray()
+  @ArrayMinSize(5)
+  @ArrayMaxSize(5)
+  @ValidateNested({ each: true })
+  @Type(() => CambioParametroDto)
+  valores: CambioParametroDto[];
 }
 
 export class BancoDto {

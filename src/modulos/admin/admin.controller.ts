@@ -19,6 +19,7 @@ import type { UsuarioAutenticado } from '../../comun/auth/tipos';
 import { ParametrosService } from '../parametros/parametros.service';
 import {
   ActualizarParametroDto,
+  ActualizarParametrosDto,
   ActualizarTipoAlimentoDto,
   BancoDto,
   CrearUsuarioInternoDto,
@@ -132,6 +133,15 @@ export class AdminController {
   @Get('parametros')
   listarParametros() {
     return this.parametros.listar();
+  }
+
+  @Put('parametros')
+  actualizarParametros(
+    @UsuarioActual() admin: UsuarioAutenticado,
+    @Body() dto: ActualizarParametrosDto,
+    @Req() peticion: Request,
+  ) {
+    return this.parametros.actualizarConjunto(dto.valores, admin.id, peticion);
   }
 
   @Put('parametros/:clave')

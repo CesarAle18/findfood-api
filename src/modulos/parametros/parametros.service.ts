@@ -100,6 +100,96 @@ export class ParametrosService {
    * Solo CLAVES_EDITABLES. Valida el tipo declarado, que los PESO_* sigan
    * sumando 1 (§6.4) y el rango de MAX_PARADAS_POR_RUTA.
    */
+  private async bloquear(tx: Tx): Promise<void> {
+    await tx.$queryRaw`
+      SELECT id FROM parametro_sistema
+      WHERE banco_id IS NULL AND clave IN (
+        'PESO_PROXIMIDAD', 'PESO_URGENCIA', 'PESO_CONFIABILIDAD',
+        'PESO_HOLGURA', 'MAX_PARADAS_POR_RUTA'
+      )
+      ORDER BY clave FOR UPDATE`;
+  }
+
+  async actualizarConjunto(
+    cambios: { clave: string; valor: string }[],
+    usuarioId: string,
+    peticion?: Request,
+  ) {
+    const solicitados = new Map(
+      cambios.map((cambio) => [cambio.clave, cambio.valor]),
+    );
+    if (
+      cambios.length !== 5 ||
+      solicitados.size !== 5 ||
+      CLAVES_EDITABLES.some((clave) => !solicitados.has(clave))
+    ) {
+      throw noProcesable(
+        'parametros-incompletos',
+        'Envía los cinco parámetros sin duplicados',
+      );
+    }
+    const resultado = await this.prisma.transaccion(async (tx: Tx) => {
+      await this.bloquear(tx);
+      const actuales = await tx.parametro_sistema.findMany({
+        where: { banco_id: null, clave: { in: [...CLAVES_EDITABLES] } },
+      });
+      if (actuales.length !== 5) throw noEncontrado('Parámetros de asignación');
+      const valores = new Map(
+        actuales.map((actual) => [
+          actual.clave,
+          validarTipo(
+            actual.tipo_dato,
+            solicitados.get(actual.clave)!,
+            actual.clave,
+          ),
+        ]),
+      );
+      const pesos = CLAVES_PESO.map((clave) => Number(valores.get(clave)));
+      if (
+        pesos.some((peso) => !Number.isFinite(peso) || peso < 0 || peso > 1) ||
+        Math.abs(pesos.reduce((sum, peso) => sum + peso, 0) - 1) > 1e-6
+      ) {
+        throw noProcesable(
+          'pesos-no-suman-uno',
+          'Los cuatro pesos deben estar entre 0 y 1 y sumar 1',
+        );
+      }
+      const paradas = Number(valores.get('MAX_PARADAS_POR_RUTA'));
+      if (
+        !Number.isInteger(paradas) ||
+        paradas < PARADAS_MIN ||
+        paradas > PARADAS_MAX
+      ) {
+        throw noProcesable(
+          'paradas-fuera-de-rango',
+          'El máximo de paradas debe estar entre 1 y 5',
+        );
+      }
+      const nuevos = [];
+      for (const actual of actuales) {
+        nuevos.push(
+          await tx.parametro_sistema.update({
+            where: { id: actual.id },
+            data: { valor: valores.get(actual.clave)!, updated_by: usuarioId },
+          }),
+        );
+      }
+      await this.trazabilidad.auditar(tx, {
+        usuarioId,
+        accion: 'ACTUALIZAR',
+        entidad: 'parametro_sistema',
+        anteriores: Object.fromEntries(
+          actuales.map((actual) => [actual.clave, actual.valor]),
+        ),
+        nuevos: Object.fromEntries(valores),
+        peticion,
+      });
+      return nuevos;
+    });
+    this.invalidar();
+    return resultado;
+  }
+
   async actualizar(
     clave: string,
     valor: string,
@@ -109,6 +199,7 @@ export class ParametrosService {
     if (!(CLAVES_EDITABLES as readonly string[]).includes(clave))
       throw noEncontrado('Parámetro');
     return this.prisma.transaccion(async (tx: Tx) => {
+      await this.bloquear(tx);
       const actual = await tx.parametro_sistema.findFirst({
         where: { clave, banco_id: null },
       });
