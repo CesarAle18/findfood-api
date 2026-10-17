@@ -428,17 +428,19 @@ describe('Flujo completo de una donación', () => {
 
   it('calificación mutua, una vez por parte', async () => {
     const asignacionId = ofertaId;
-    await ctx
+    const primera = await ctx
       .como(donante)
       .post(`/v1/asignaciones/${asignacionId}/calificacion`)
       .send({ puntaje: 5, comentario: 'Puntual' })
       .expect(201);
+    // F-12: repetir es idempotente; devuelve la calificación original.
     const repetida = await ctx
       .como(donante)
       .post(`/v1/asignaciones/${asignacionId}/calificacion`)
       .send({ puntaje: 4 })
-      .expect(409);
-    expect(repetida.body.type).toBe('ya-calificada');
+      .expect(200);
+    expect(repetida.body.id).toBe(primera.body.id);
+    expect(repetida.body.puntaje).toBe(5);
     await ctx
       .como(voluntarioAsignado)
       .post(`/v1/asignaciones/${asignacionId}/calificacion`)

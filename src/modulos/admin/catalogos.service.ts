@@ -111,6 +111,22 @@ export class CatalogosService {
           orderBy: { id: 'asc' },
           select: { id: true, codigo: true, nombre: true },
         }),
+      aspectos_calificacion: () =>
+        this.prisma.aspecto_calificacion.findMany({
+          where: {
+            ...activo,
+            ...(filtro.rol_calificado
+              ? { rol_calificado: filtro.rol_calificado }
+              : {}),
+          },
+          orderBy: { id: 'asc' },
+          select: {
+            id: true,
+            rol_calificado: true,
+            codigo: true,
+            nombre: true,
+          },
+        }),
     };
     const pedidos = filtro.incluir?.length
       ? [...new Set(filtro.incluir)]

@@ -119,6 +119,22 @@ model asignacion {
   @@schema("public")
 }
 
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model aspecto_calificacion {
+  id                   Int                    @id @default(autoincrement()) @db.SmallInt
+  rol_calificado       String                 @db.VarChar(20)
+  codigo               String                 @db.VarChar(40)
+  nombre               String                 @db.VarChar(80)
+  activo               Boolean                @default(true)
+  created_at           DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime               @default(now()) @db.Timestamptz(6)
+  calificacion_aspecto calificacion_aspecto[]
+
+  @@unique([rol_calificado, codigo], map: "uq_aspecto_calificacion_rol_codigo")
+  @@schema("public")
+}
+
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model auditoria {
   id                 BigInt   @id @default(autoincrement())
@@ -185,19 +201,32 @@ model banco_tipo_alimento {
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model calificacion {
-  id                                           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  asignacion_id                                String     @db.Uuid
-  calificador_id                               String     @db.Uuid
-  calificado_id                                String     @db.Uuid
-  puntaje                                      Int        @db.SmallInt
+  id                                           String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  asignacion_id                                String                 @db.Uuid
+  calificador_id                               String                 @db.Uuid
+  calificado_id                                String                 @db.Uuid
+  puntaje                                      Int                    @db.SmallInt
   comentario                                   String?
-  created_at                                   DateTime   @default(now()) @db.Timestamptz(6)
-  asignacion                                   asignacion @relation(fields: [asignacion_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_calificacion_asignacion")
-  usuario_calificacion_calificador_idTousuario usuario    @relation("calificacion_calificador_idTousuario", fields: [calificador_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_calificacion_emisor")
-  usuario_calificacion_calificado_idTousuario  usuario    @relation("calificacion_calificado_idTousuario", fields: [calificado_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_calificacion_receptor")
+  created_at                                   DateTime               @default(now()) @db.Timestamptz(6)
+  asignacion                                   asignacion             @relation(fields: [asignacion_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_calificacion_asignacion")
+  usuario_calificacion_calificador_idTousuario usuario                @relation("calificacion_calificador_idTousuario", fields: [calificador_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_calificacion_emisor")
+  usuario_calificacion_calificado_idTousuario  usuario                @relation("calificacion_calificado_idTousuario", fields: [calificado_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_calificacion_receptor")
+  calificacion_aspecto                         calificacion_aspecto[]
 
   @@unique([asignacion_id, calificador_id, calificado_id], map: "uq_calificacion")
   @@index([calificado_id, created_at(sort: Desc)], map: "ix_calificacion_calificado")
+  @@schema("public")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model calificacion_aspecto {
+  calificacion_id      String               @db.Uuid
+  aspecto_id           Int                  @db.SmallInt
+  aspecto_calificacion aspecto_calificacion @relation(fields: [aspecto_id], references: [id], onUpdate: NoAction, map: "fk_calificacion_aspecto_aspecto")
+  calificacion         calificacion         @relation(fields: [calificacion_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_calificacion_aspecto_calificacion")
+
+  @@id([calificacion_id, aspecto_id], map: "pk_calificacion_aspecto")
+  @@index([aspecto_id], map: "ix_calificacion_aspecto_aspecto")
   @@schema("public")
 }
 

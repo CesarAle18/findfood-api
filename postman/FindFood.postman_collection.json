@@ -2366,13 +2366,14 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"puntaje\": 5,\n  \"comentario\": \"Muy puntual\"\n}",
+              "raw": "{\n  \"puntaje\": 5,\n  \"comentario\": \"Muy puntual\",\n  \"aspectos\": [\n    \"PUNTUALIDAD\",\n    \"CUIDADO\"\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
-            }
+            },
+            "description": "Aspectos opcionales del catálogo `aspectos_calificacion` (rol VOLUNTARIO). Idempotente: la primera vez responde 201; repetirla devuelve 200 con la calificación original, sin duplicar. Un aspecto fuera del catálogo responde 422 `aspecto-invalido`."
           }
         },
         {

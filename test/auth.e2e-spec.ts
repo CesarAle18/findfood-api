@@ -324,10 +324,11 @@ describe('Autenticación y autorización', () => {
   });
 
   describe('Catálogos', () => {
-    it('sin filtro devuelve los siete catálogos', async () => {
+    it('sin filtro devuelve los ocho catálogos', async () => {
       const cuenta = await ctx.cuenta();
       const r = await ctx.como(cuenta).get('/v1/catalogos').expect(200);
       expect(Object.keys(r.body).sort()).toEqual([
+        'aspectos_calificacion',
         'categorias_alimento',
         'motivos',
         'tipos_alimento',

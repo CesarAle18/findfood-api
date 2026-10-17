@@ -6,6 +6,7 @@ import {
   noEncontrado,
   noProcesable,
 } from '../../comun/http/problema';
+import { validarAspectos } from '../../comun/aspectos';
 import { validarMotivo } from '../../comun/motivos';
 import { PrismaService, type Tx } from '../../comun/prisma/prisma.service';
 import { TrazabilidadService } from '../../comun/trazabilidad/trazabilidad.service';
@@ -464,7 +465,10 @@ export class AsignacionService {
     return { id, estado: 'ABANDONADA', donacion_republicada: republicada };
   }
 
-  /** Calificación mutua, una vez por parte, tras COMPLETADA. */
+  /**
+   * Calificación mutua, una vez por parte, tras COMPLETADA. Repetirla no
+   * duplica ni recalcula promedios: `creada` en false (HTTP 200).
+   */
   async calificar(
     usuario: UsuarioAutenticado,
     id: string,
@@ -502,14 +506,26 @@ export class AsignacionService {
     }
     const voluntario = a.voluntario;
     const calificado = esDonante ? voluntario.usuario_id : donante.usuario_id;
+    const aspectos = await validarAspectos(
+      this.prisma,
+      dto.aspectos,
+      esDonante ? 'VOLUNTARIO' : 'DONANTE',
+    );
+    const clave = {
+      asignacion_id: id,
+      calificador_id: usuario.id,
+      calificado_id: calificado,
+    };
+
+    // F-12: repetir es idempotente; se devuelve la calificación original.
+    const existente = await this.calificacionExistente(clave);
+    if (existente) return { creada: false, calificacion: existente };
 
     try {
-      return await this.prisma.transaccion(async (tx) => {
-        const calificacion = await tx.calificacion.create({
+      const calificacion = await this.prisma.transaccion(async (tx) => {
+        const creada = await tx.calificacion.create({
           data: {
-            asignacion_id: id,
-            calificador_id: usuario.id,
-            calificado_id: calificado,
+            ...clave,
             puntaje: dto.puntaje,
             comentario: dto.comentario ?? null,
           },
@@ -520,6 +536,14 @@ export class AsignacionService {
             created_at: true,
           },
         });
+        if (aspectos.length) {
+          await tx.calificacion_aspecto.createMany({
+            data: aspectos.map((a) => ({
+              calificacion_id: creada.id,
+              aspecto_id: a.id,
+            })),
+          });
+        }
         if (esDonante) {
           await tx.$executeRaw`
             UPDATE voluntario v
@@ -542,13 +566,51 @@ export class AsignacionService {
                        AND c.calificado_id = ${donante.usuario_id}::uuid) s
              WHERE dn.id = ${donante.id}::uuid`;
         }
-        return calificacion;
+        return {
+          id: creada.id,
+          puntaje: creada.puntaje,
+          comentario: creada.comentario,
+          aspectos: aspectos.map(({ codigo, nombre }) => ({ codigo, nombre })),
+          created_at: creada.created_at,
+        };
       });
+      return { creada: true, calificacion };
     } catch (err) {
       if (violaUnicidad(err)) {
-        throw conflicto('ya-calificada', 'Ya calificaste esta recolección');
+        // Carrera entre dos envíos simultáneos: gana el primero.
+        const ganadora = await this.calificacionExistente(clave);
+        if (ganadora) return { creada: false, calificacion: ganadora };
       }
       throw err;
     }
+  }
+
+  private async calificacionExistente(clave: {
+    asignacion_id: string;
+    calificador_id: string;
+    calificado_id: string;
+  }) {
+    const c = await this.prisma.calificacion.findUnique({
+      where: { asignacion_id_calificador_id_calificado_id: clave },
+      select: {
+        id: true,
+        puntaje: true,
+        comentario: true,
+        created_at: true,
+        calificacion_aspecto: {
+          orderBy: { aspecto_id: 'asc' },
+          select: {
+            aspecto_calificacion: { select: { codigo: true, nombre: true } },
+          },
+        },
+      },
+    });
+    if (!c) return null;
+    const { calificacion_aspecto, created_at, ...resto } = c;
+    return {
+      ...resto,
+      aspectos: calificacion_aspecto.map((a) => a.aspecto_calificacion),
+      created_at,
+    };
   }
 }
