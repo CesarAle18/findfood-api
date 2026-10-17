@@ -591,6 +591,12 @@ export class DonacionesService {
             },
           },
         },
+        // Para calificada_por_mi: a lo sumo una fila (uq_calificacion).
+        calificacion: {
+          where: { calificador_id: usuario.id },
+          select: { id: true },
+          take: 1,
+        },
       },
     });
 
@@ -647,6 +653,7 @@ export class DonacionesService {
             aceptada_at: asignacion.aceptada_at,
             ruta_id: asignacion.ruta_id,
             flota_banco: Boolean(asignacion.banco_ejecutor_id),
+            calificada_por_mi: asignacion.calificacion.length > 0,
             voluntario:
               perfilVoluntario &&
               (personal || (esDueno && aceptada) || esVoluntario)

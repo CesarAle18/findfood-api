@@ -1,5 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
+  ArrayUnique,
+  IsArray,
   IsInt,
   IsOptional,
   IsString,
@@ -35,4 +38,18 @@ export class CalificacionDto {
   @IsString()
   @MaxLength(1000)
   comentario?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    maxItems: 5,
+    example: ['PUNTUALIDAD', 'CUIDADO'],
+    description:
+      'Códigos del catálogo aspectos_calificacion del rol calificado (GET /v1/catalogos?incluir=aspectos_calificacion)',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(5)
+  @ArrayUnique()
+  @IsString({ each: true })
+  aspectos?: string[];
 }

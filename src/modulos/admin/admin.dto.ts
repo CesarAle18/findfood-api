@@ -217,6 +217,7 @@ export const CATALOGOS = [
   'motivos',
   'tipos_incidencia',
   'tipos_destino_distribucion',
+  'aspectos_calificacion',
 ] as const;
 export type Catalogo = (typeof CATALOGOS)[number];
 
@@ -247,4 +248,13 @@ export class FiltroCatalogosDto {
   @IsOptional()
   @IsIn(Object.values(ambito_motivo))
   ambito?: ambito_motivo;
+
+  @ApiPropertyOptional({
+    enum: ['DONANTE', 'VOLUNTARIO'],
+    description:
+      'Filtra los aspectos de calificación por rol calificado (el donante califica al VOLUNTARIO)',
+  })
+  @IsOptional()
+  @IsIn(['DONANTE', 'VOLUNTARIO'])
+  rol_calificado?: 'DONANTE' | 'VOLUNTARIO';
 }

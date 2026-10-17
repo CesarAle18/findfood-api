@@ -6,8 +6,10 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Res,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiResponse, ApiTags } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { Roles, UsuarioActual } from '../../comun/auth/decoradores';
 import type { UsuarioAutenticado } from '../../comun/auth/tipos';
 import { CalificacionDto, RespuestaConMotivoDto } from './asignacion.dto';
@@ -59,11 +61,23 @@ export class AsignacionController {
 
   @Post(':id/calificacion')
   @Roles('DONANTE', 'VOLUNTARIO')
-  calificar(
+  @ApiResponse({ status: 201, description: 'Calificación creada' })
+  @ApiResponse({
+    status: 200,
+    description: 'Ya existía: se devuelve la original sin cambios',
+  })
+  async calificar(
     @Param('id', ParseUUIDPipe) id: string,
     @UsuarioActual() usuario: UsuarioAutenticado,
     @Body() dto: CalificacionDto,
+    @Res({ passthrough: true }) res: Response,
   ) {
-    return this.asignacion.calificar(usuario, id, dto);
+    const { creada, calificacion } = await this.asignacion.calificar(
+      usuario,
+      id,
+      dto,
+    );
+    res.status(creada ? 201 : 200);
+    return calificacion;
   }
 }

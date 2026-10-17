@@ -543,7 +543,8 @@ Todas las rutas usan JSON, exigen JWT (salvo las indicadas) y devuelven errores 
 | `GET /v1/donaciones/{id}/candidatos` | ADMIN, ASESOR_BANCO | Auditoría del matching (`candidato_asignacion`) |
 | `GET /v1/asignaciones/ofertas` | VOLUNTARIO | Ofertas vivas y aceptadas propias |
 | `POST /v1/asignaciones/{id}/aceptar` · `…/rechazar` · `…/abandonar` | VOLUNTARIO | §6.7. Rechazar y abandonar exigen motivo. |
-| `POST /v1/asignaciones/{id}/calificacion` | DONANTE, VOLUNTARIO | Una vez por parte, tras COMPLETADA |
+| `POST /v1/asignaciones/{id}/calificacion` | DONANTE, VOLUNTARIO | Una vez por parte, tras COMPLETADA. `aspectos` opcional (hasta 5 códigos de `aspecto_calificacion` del rol calificado; fuera del catálogo → 422 `aspecto-invalido` con `codigos_invalidos`). Idempotente: la primera vez 201; repetirla devuelve 200 con la calificación original, sin duplicar ni recalcular promedios. Respuesta `{ id, puntaje, comentario, aspectos: [{ codigo, nombre }], created_at }`. |
+| `GET /v1/catalogos?incluir=aspectos_calificacion` | cualquier cuenta autenticada | Aspectos activos `{ id, rol_calificado, codigo, nombre }`; `rol_calificado=VOLUNTARIO` filtra los que usa el donante al calificar al voluntario. El detalle de la donación expone `asignacion.calificada_por_mi`. |
 
 ### Ruteo, evidencia e incidencias
 
