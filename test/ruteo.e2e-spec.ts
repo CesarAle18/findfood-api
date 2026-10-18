@@ -307,7 +307,8 @@ describe('Ruteo', () => {
       'ENTREGA',
       entrega.id,
     );
-    await confirmar(entrega.id, {}).expect(200);
+    // null means "not recorded" and is accepted on a delivery.
+    await confirmar(entrega.id, { estado_producto: null }).expect(200);
     const detalle = await ctx
       .como(voluntario)
       .get(`/v1/rutas/${ruta.body.id}`)

@@ -692,7 +692,7 @@ export class RuteoService {
     await this.prisma.transaccion(async (tx) => {
       const p = await this.bloquearParada(tx, paradaId);
       this.exigirEjecutor(usuario, p, p.tipo === 'ENTREGA');
-      if (p.tipo !== 'RECOGIDA' && dto.estado_producto !== undefined) {
+      if (p.tipo !== 'RECOGIDA' && dto.estado_producto != null) {
         throw noProcesable(
           'parada-no-recogida',
           'El estado del producto solo se registra en una recogida',
