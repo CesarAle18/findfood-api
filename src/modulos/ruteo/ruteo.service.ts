@@ -453,6 +453,7 @@ export class RuteoService {
              ST_Y(p.ubicacion::geometry) AS lat, ST_X(p.ubicacion::geometry) AS lng,
              p.hora_estimada_llegada, p.hora_real_llegada, p.peso_confirmado_kg,
              p.confirmacion_manual, p.precision_confirmacion_m, p.confirmada_at, p.observaciones,
+             p.estado_producto::text AS estado_producto,
              d.codigo AS donacion_codigo, d.estado::text AS donacion_estado,
              d.peso_estimado_kg, d.ventana_recogida_inicio, d.ventana_recogida_fin,
              d.referencia_recogida,
@@ -691,6 +692,12 @@ export class RuteoService {
     await this.prisma.transaccion(async (tx) => {
       const p = await this.bloquearParada(tx, paradaId);
       this.exigirEjecutor(usuario, p, p.tipo === 'ENTREGA');
+      if (p.tipo !== 'RECOGIDA' && dto.estado_producto !== undefined) {
+        throw noProcesable(
+          'parada-no-recogida',
+          'El estado del producto solo se registra en una recogida',
+        );
+      }
       if (p.parada_estado === 'COMPLETADA') {
         if (p.confirmada_por === usuario.id) return;
         throw conflicto(
@@ -740,6 +747,7 @@ export class RuteoService {
              ubicacion_confirmacion = ${sqlPuntoOpcional(dto.ubicacion)},
              precision_confirmacion_m = ${dto.precision_m ?? null}::numeric,
              confirmacion_manual = ${Boolean(dto.confirmacion_manual)},
+             estado_producto = ${dto.estado_producto ?? null}::estado_producto,
              observaciones = ${dto.observaciones ?? null}
        WHERE id = ${p.parada_id}::uuid`;
     await this.trazabilidad.registrar(tx, {
@@ -754,6 +762,7 @@ export class RuteoService {
         precision_m: dto.precision_m ?? null,
         confirmacion_manual: Boolean(dto.confirmacion_manual),
         peso_kg: dto.peso_confirmado_kg ?? null,
+        estado_producto: dto.estado_producto ?? null,
       },
     });
   }
@@ -1003,7 +1012,8 @@ export class RuteoService {
              p.donacion_id, p.almacen_id, p.direccion,
              ST_Y(p.ubicacion::geometry) AS lat, ST_X(p.ubicacion::geometry) AS lng,
              p.hora_estimada_llegada, p.hora_real_llegada, p.peso_confirmado_kg,
-             p.confirmacion_manual, p.precision_confirmacion_m, p.confirmada_at, p.observaciones
+             p.confirmacion_manual, p.precision_confirmacion_m, p.confirmada_at, p.observaciones,
+             p.estado_producto::text AS estado_producto
         FROM parada_ruta p WHERE p.id = ${id}::uuid`;
     return p;
   }
