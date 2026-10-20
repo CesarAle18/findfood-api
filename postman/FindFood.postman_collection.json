@@ -1777,7 +1777,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"peso_confirmado_kg\": 9.5,\n  \"ubicacion\": { \"lat\": 4.6533, \"lng\": -74.0836 },\n  \"precision_m\": 12,\n  \"confirmada_en_dispositivo\": \"{{$isoTimestamp}}\"\n}",
+              "raw": "{\n  \"peso_confirmado_kg\": 9.5,\n  \"ubicacion\": { \"lat\": 4.6533, \"lng\": -74.0836 },\n  \"precision_m\": 12,\n  \"estado_producto\": \"BUENO\",\n  \"confirmada_en_dispositivo\": \"{{$isoTimestamp}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

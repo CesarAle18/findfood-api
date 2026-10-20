@@ -232,6 +232,94 @@ describe('Ruteo', () => {
     expect(final.body.estado).toBe('COMPLETADA');
   });
 
+  it('la recogida registra el estado del producto; la entrega lo rechaza (API-10)', async () => {
+    const donacion = await asignada({
+      lat: ZONA.lat + 0.002,
+      lng: ZONA.lng + 0.002,
+    });
+    const ruta = await ctx
+      .como(voluntario)
+      .post('/v1/rutas')
+      .send({ donacion_ids: [donacion] })
+      .expect(201);
+    const [recogida, entrega] = ruta.body.paradas;
+    await ctx
+      .como(voluntario)
+      .post(`/v1/rutas/${ruta.body.id}/iniciar`)
+      .expect(200);
+
+    const evidencia = async (id: string, tipo: string, paradaId: string) =>
+      ctx
+        .como(voluntario)
+        .post('/v1/evidencias')
+        .send({
+          id,
+          tipo,
+          ruta: await ctx.ruta(voluntario, 'EVIDENCIA'),
+          parada_id: paradaId,
+          capturada_at: new Date().toISOString(),
+        })
+        .expect(201);
+    const confirmar = (paradaId: string, extra: Record<string, unknown>) =>
+      ctx
+        .como(voluntario)
+        .post(`/v1/paradas/${paradaId}/confirmar`)
+        .send({
+          confirmacion_manual: true,
+          confirmada_en_dispositivo: new Date().toISOString(),
+          ...extra,
+        });
+
+    const invalido = await confirmar(recogida.id, {
+      peso_confirmado_kg: 18,
+      estado_producto: 'EXCELENTE',
+    }).expect(400);
+    expect(invalido.body.type).toBe('validacion');
+
+    await evidencia(
+      'e1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e',
+      'RECOGIDA',
+      recogida.id,
+    );
+    const r = await confirmar(recogida.id, {
+      peso_confirmado_kg: 18,
+      estado_producto: 'REGULAR',
+    }).expect(200);
+    expect(r.body).toMatchObject({
+      estado: 'COMPLETADA',
+      estado_producto: 'REGULAR',
+    });
+
+    // Repetir la confirmación es un no-op: conserva el estado original.
+    const repetida = await confirmar(recogida.id, {
+      peso_confirmado_kg: 18,
+      estado_producto: 'MALO',
+    }).expect(200);
+    expect(repetida.body.estado_producto).toBe('REGULAR');
+
+    const enEntrega = await confirmar(entrega.id, {
+      estado_producto: 'BUENO',
+    }).expect(422);
+    expect(enEntrega.body.type).toBe('parada-no-recogida');
+
+    await evidencia(
+      'f1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e',
+      'ENTREGA',
+      entrega.id,
+    );
+    // null means "not recorded" and is accepted on a delivery.
+    await confirmar(entrega.id, { estado_producto: null }).expect(200);
+    const detalle = await ctx
+      .como(voluntario)
+      .get(`/v1/rutas/${ruta.body.id}`)
+      .expect(200);
+    expect(detalle.body.paradas[0]).toMatchObject({
+      id: recogida.id,
+      estado_producto: 'REGULAR',
+    });
+    expect(detalle.body.paradas[1].estado_producto).toBeNull();
+  });
+
   it('las evidencias solo se registran sobre paradas propias y con rutas de archivo propias', async () => {
     const donacion = await asignada({
       lat: ZONA.lat - 0.002,

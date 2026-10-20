@@ -20,7 +20,7 @@ import {
 } from 'class-validator';
 import { CoordenadaDto } from '../../comun/geo';
 import { PaginacionDto } from '../../comun/validacion';
-import { estado_ruta } from '../../generated/prisma/enums';
+import { estado_producto, estado_ruta } from '../../generated/prisma/enums';
 
 export class CrearRutaDto {
   @ApiProperty({
@@ -107,6 +107,15 @@ export class ConfirmarParadaDto {
   @IsOptional()
   @IsBoolean()
   confirmacion_manual?: boolean;
+
+  @ApiPropertyOptional({
+    enum: estado_producto,
+    description:
+      'Solo en RECOGIDA: estado en que se recibe el producto (en ENTREGA → 422 parada-no-recogida)',
+  })
+  @IsOptional()
+  @IsIn(Object.values(estado_producto))
+  estado_producto?: estado_producto;
 
   @ApiProperty({ description: 'Hora del dispositivo al confirmar' })
   @IsISO8601({ strict: true })

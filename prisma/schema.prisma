@@ -675,6 +675,7 @@ model parada_ruta {
   observaciones            String?
   created_at               DateTime                  @default(now()) @db.Timestamptz(6)
   updated_at               DateTime                  @default(now()) @db.Timestamptz(6)
+  estado_producto          estado_producto?
   evidencia                evidencia[]
   historial_estado         historial_estado[]
   incidencia               incidencia[]
@@ -1181,6 +1182,14 @@ enum estado_parada {
   COMPLETADA
   FALLIDA
   OMITIDA
+
+  @@schema("public")
+}
+
+enum estado_producto {
+  BUENO
+  REGULAR
+  MALO
 
   @@schema("public")
 }

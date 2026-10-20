@@ -425,6 +425,7 @@ La ruta resultante tiene N paradas RECOGIDA y una parada ENTREGA en el `almacen_
 - el peso real;
 - la ubicación y su precisión (`precision_confirmacion_m`);
 - la hora del dispositivo;
+- en una RECOGIDA, el `estado_producto` opcional (`BUENO`, `REGULAR` o `MALO`) en que se recibe el producto; enviarlo en una ENTREGA responde 422 `parada-no-recogida`. La parada lo devuelve en `estado_producto` (`null` si no se registró);
 - las evidencias ya subidas (§8.5).
 
 Si la precisión del GPS es peor que `GPS_PRECISION_MIN_M`, la app ofrece la **confirmación manual**, que queda marcada en `confirmacion_manual = true` para auditoría (anteproyecto §9.5). La API registra en la misma transacción:
