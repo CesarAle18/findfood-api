@@ -17,6 +17,7 @@ import { IncidenciasService } from '../incidencias/incidencias.service';
 import { NotificacionesService } from '../notificaciones/notificaciones.service';
 import type { CalificacionDto, RespuestaConMotivoDto } from './asignacion.dto';
 import { MotorAsignacionService } from './motor.service';
+import { RutasDinamicasService } from './rutas-dinamicas.service';
 
 export interface OpcionesCierre {
   estados?: estado_asignacion[];
@@ -33,6 +34,7 @@ export class AsignacionService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly motor: MotorAsignacionService,
+    private readonly rutasDinamicas: RutasDinamicasService,
     private readonly trazabilidad: TrazabilidadService,
     private readonly notificaciones: NotificacionesService,
     private readonly voluntarios: VoluntarioService,
@@ -276,48 +278,80 @@ export class AsignacionService {
     );
   }
 
-  /** Aceptar (§6.7): una sentencia condicional evaluada por la base, sin carreras. */
+  /** Acepta y añade a una única ruta activa, dentro de una transacción. */
   async aceptar(usuario: UsuarioAutenticado, id: string) {
     const voluntario = await this.voluntarios.propio(usuario.id);
-    await this.prisma.transaccion(async (tx) => {
+    const resultado = await this.prisma.transaccion(async (tx) => {
+      // Serializa las aceptaciones del mismo voluntario.
+      await tx.$queryRaw`SELECT id FROM voluntario WHERE id = ${voluntario.id}::uuid FOR UPDATE`;
+      const oferta = await tx.asignacion.findUnique({
+        where: { id },
+        select: { donacion_id: true, voluntario_id: true, estado: true, expira_at: true },
+      });
+      if (!oferta || oferta.voluntario_id !== voluntario.id) throw noEncontrado('Oferta');
+      if (oferta.estado !== 'OFRECIDA' || oferta.expira_at <= new Date()) {
+        await this.motivoRespuestaFallida(tx, id, voluntario.id);
+      }
+
+      const plan = await this.rutasDinamicas.incorporar(tx, {
+        voluntarioId: voluntario.id,
+        usuarioId: usuario.id,
+        donacionId: oferta.donacion_id,
+        asignacionId: id,
+        capacidadKg: Number(voluntario.capacidad_carga_kg),
+      });
+      if (!plan.viable) {
+        // Sólo rechazos logísticos reales avanzan la cascada; los errores técnicos
+        // deben propagar excepción y revertir toda la operación.
+        await tx.$executeRaw`
+          UPDATE asignacion SET estado = 'RECHAZADA', respondida_at = now(),
+                 finalizada_at = now(), observacion = ${'Incompatibilidad logística: ' + plan.motivo}
+          WHERE id = ${id}::uuid AND estado = 'OFRECIDA'`;
+        await this.trazabilidad.registrar(tx, {
+          ambito: 'ASIGNACION', entidad: { asignacionId: id },
+          anterior: 'OFRECIDA', nuevo: 'RECHAZADA', usuarioId: usuario.id,
+          motivo: plan.motivo,
+        });
+        return { aceptada: false as const, donacionId: oferta.donacion_id,
+          codigo: plan.codigo, motivo: plan.motivo };
+      }
+
       const [aceptada] = await tx.$queryRaw<{ donacion_id: string }[]>`
-        UPDATE asignacion
-           SET estado = 'ACEPTADA', aceptada_at = now(), respondida_at = now()
-         WHERE id = ${id}::uuid AND voluntario_id = ${voluntario.id}::uuid
-           AND estado = 'OFRECIDA' AND expira_at > now()
+        UPDATE asignacion SET estado = 'ACEPTADA', aceptada_at = now(),
+               respondida_at = now(), ruta_id = ${plan.rutaId}::uuid
+        WHERE id = ${id}::uuid AND voluntario_id = ${voluntario.id}::uuid
+          AND estado = 'OFRECIDA' AND expira_at > now()
         RETURNING donacion_id`;
       if (!aceptada) await this.motivoRespuestaFallida(tx, id, voluntario.id);
-
       const ok = await this.donaciones.transicion(tx, {
-        donacionId: aceptada.donacion_id,
-        desde: ['PUBLICADA'],
-        hacia: 'ASIGNADA',
-        usuarioId: usuario.id,
+        donacionId: oferta.donacion_id, desde: ['PUBLICADA'],
+        hacia: 'ASIGNADA', usuarioId: usuario.id,
         datos: { asignada_at: new Date(), modo_recoleccion: 'VOLUNTARIO' },
       });
-      if (!ok) {
-        throw conflicto(
-          'donacion-no-disponible',
-          'La donación ya no está disponible',
-        );
-      }
-      await this.trazabilidad.registrar(tx, {
-        ambito: 'ASIGNACION',
-        entidad: { asignacionId: id },
-        anterior: 'OFRECIDA',
-        nuevo: 'ACEPTADA',
-        usuarioId: usuario.id,
+      if (!ok) throw conflicto('donacion-no-disponible', 'La donación ya no está disponible');
+      const enRecogida = await this.donaciones.transicion(tx, {
+        donacionId: oferta.donacion_id, desde: ['ASIGNADA'],
+        hacia: 'EN_RECOLECCION', usuarioId: usuario.id,
+        metadata: { ruta_id: plan.rutaId },
       });
-      const donacion = await this.donaciones.bloquear(tx, aceptada.donacion_id);
+      if (!enRecogida) throw conflicto('donacion-no-disponible', 'No se pudo iniciar la recogida');
+      await this.trazabilidad.registrar(tx, {
+        ambito: 'ASIGNACION', entidad: { asignacionId: id },
+        anterior: 'OFRECIDA', nuevo: 'ACEPTADA', usuarioId: usuario.id,
+      });
+      const donacion = await this.donaciones.bloquear(tx, oferta.donacion_id);
       await this.notificaciones.encolar(tx, {
-        usuarioId: donacion!.donante_usuario_id,
-        codigo: 'ASIGNACION_ACEPTADA',
-        donacionId: aceptada.donacion_id,
-        asignacionId: id,
+        usuarioId: donacion!.donante_usuario_id, codigo: 'ASIGNACION_ACEPTADA',
+        donacionId: oferta.donacion_id, asignacionId: id,
         variables: { voluntario: usuario.nombres },
       });
+      return { aceptada: true as const, rutaId: plan.rutaId };
     });
-    return { id, estado: 'ACEPTADA' };
+    if (!resultado.aceptada) {
+      await this.continuarCascada(resultado.donacionId);
+      throw noProcesable(resultado.codigo, 'La oferta no es compatible con la ruta activa', resultado.motivo);
+    }
+    return { id, estado: 'ACEPTADA', ruta: { id: resultado.rutaId, estado: 'EN_CURSO', actualizada: true } };
   }
 
   /** Rechazar cierra el intento y ofrece al siguiente EN la misma petición (§6.7). */
