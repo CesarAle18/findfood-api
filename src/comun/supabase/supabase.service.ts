@@ -71,6 +71,16 @@ export class SupabaseService {
     return data.user.id;
   }
 
+  /**
+   * Correo "Reset Password" de Supabase Auth. Para que lleve un código, la
+   * plantilla debe mostrar {{ .Token }}; el cliente lo canjea con verifyOtp
+   * (type 'recovery') y luego cambia la contraseña.
+   */
+  async enviarCodigoRecuperacion(email: string): Promise<void> {
+    const { error } = await this.cliente.auth.resetPasswordForEmail(email);
+    if (error) throw new ErrorSupabase(error.message, error.code, error.status);
+  }
+
   async eliminarUsuario(id: string): Promise<void> {
     const { error } = await this.cliente.auth.admin.deleteUser(id);
     if (error) throw new ErrorSupabase(error.message, error.code, error.status);

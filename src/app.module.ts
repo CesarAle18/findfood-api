@@ -13,6 +13,7 @@ import { AdminModule } from './modulos/admin/admin.module';
 import { AsignacionModule } from './modulos/asignacion/asignacion.module';
 import { DonacionesModule } from './modulos/donaciones/donaciones.module';
 import { EvidenciasModule } from './modulos/evidencias/evidencias.module';
+import { GeoModule } from './modulos/geo/geo.module';
 import { IdentidadModule } from './modulos/identidad/identidad.module';
 import { IncidenciasModule } from './modulos/incidencias/incidencias.module';
 import { InventarioModule } from './modulos/inventario/inventario.module';
@@ -62,6 +63,7 @@ import { TareasModule } from './modulos/tareas/tareas.module';
     IncidenciasModule,
     RuteoModule,
     InventarioModule,
+    GeoModule,
     TareasModule,
   ],
 })

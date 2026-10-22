@@ -345,11 +345,17 @@ export class AsignacionService {
         donacionId: oferta.donacion_id, asignacionId: id,
         variables: { voluntario: usuario.nombres },
       });
-      return { aceptada: true as const, rutaId: plan.rutaId };
+      return { aceptada: true as const, rutaId: plan.rutaId, origen: plan.origen };
     });
     if (!resultado.aceptada) {
       await this.continuarCascada(resultado.donacionId);
       throw noProcesable(resultado.codigo, 'La oferta no es compatible con la ruta activa', resultado.motivo);
+    }
+    // Fuera de la transacción: el trazado por calles depende de Google y nunca bloquea la aceptación.
+    try {
+      await this.rutasDinamicas.trazar(resultado.rutaId, resultado.origen);
+    } catch (err) {
+      this.logger.warn({ err, rutaId: resultado.rutaId }, 'No se pudo guardar el trazado de la ruta');
     }
     return { id, estado: 'ACEPTADA', ruta: { id: resultado.rutaId, estado: 'EN_CURSO', actualizada: true } };
   }

@@ -1,0 +1,4573 @@
+{
+  "info": {
+    "_postman_id": "6d0f3a52-8f1e-4c1b-9a77-f1ad00e0d901",
+    "name": "FindFood API · todos los endpoints",
+    "description": "Los 78 endpoints de la API, agrupados por módulo, más la carpeta de sesión de Supabase Auth (registro, login, códigos). **Generada desde el código** con `npm run postman:generar`: no la edites a mano, regenérala cuando cambie un controlador o un DTO.\n\nPara recorrer el flujo completo en orden (donación → recepción) usa `FindFood.postman_collection.json`; esta colección es el catálogo de referencia.\n\n**Local:** `npm run db:local`, `npm run datos:prueba`, `npm run start:local`, importa `postman/FindFood-local.postman_environment.json` y selecciónalo. Los tokens de cada rol se firman solos.\n\n**Proyecto real:** crea un environment con `base_url`, completa `supabase_anon_key` y ejecuta `Sesión (Supabase Auth) → Iniciar sesión`: guarda `token_sesion`, que se usa para todos los roles.\n\n- Cada petición usa el token del primer rol permitido; la descripción lista los demás.\n- Crear y listar guardan el `id` en variables de colección (`donacion_id`, `ruta_id`, `sede_id`…), que usan las rutas con `:id`.\n- Los parámetros de consulta vienen desactivados: actívalos según lo que quieras filtrar.\n- Errores en application/problem+json con un `type` estable.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Sesión (Supabase Auth)",
+      "description": "Registro, inicio de sesión, renovación, códigos y cambio de contraseña. **Los atiende Supabase Auth, no la API**: solo funcionan contra el proyecto real.\n\n- Completa las variables de colección `supabase_url` y `supabase_anon_key` (Supabase → Project Settings → API).\n- Iniciar sesión, renovar y verificar códigos guardan `token_sesion` y `refresh_token`. Sin el environment local, la colección usa `token_sesion` para todos los roles.\n- Para usar ese token con la API, esta debe correr contra el proyecto real (`npm run start:dev`).",
+      "item": [
+        {
+          "name": "Registro · POST /auth/v1/signup",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{supabase_url}}/auth/v1/signup",
+              "host": [
+                "{{supabase_url}}"
+              ],
+              "path": [
+                "auth",
+                "v1",
+                "signup"
+              ]
+            },
+            "description": "Todo registro nace DONANTE (el rol nunca viaja en `data`). Si el proyecto exige confirmar el correo, la cuenta queda PENDIENTE hasta confirmarlo; sin teléfono también.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"persona@correo.com\",\n  \"password\": \"Clave-segura-123\",\n  \"data\": {\n    \"nombres\": \"Persona\",\n    \"apellidos\": \"De Prueba\",\n    \"telefono\": \"3001234567\",\n    \"acepto_terminos\": true\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (cuerpo.access_token) {",
+                  "  pm.collectionVariables.set('token_sesion', cuerpo.access_token);",
+                  "  pm.collectionVariables.set('refresh_token', cuerpo.refresh_token);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Iniciar sesión · POST /auth/v1/token?grant_type=password",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{supabase_url}}/auth/v1/token?grant_type=password",
+              "host": [
+                "{{supabase_url}}"
+              ],
+              "path": [
+                "auth",
+                "v1",
+                "token"
+              ],
+              "query": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                }
+              ]
+            },
+            "description": "Devuelve `access_token` (el Bearer de la API) y `refresh_token`, y los guarda. En el panel web, después llama a `Validar acceso al panel`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@findfood.test\",\n  \"password\": \"FindFood-Pruebas-2026\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (cuerpo.access_token) {",
+                  "  pm.collectionVariables.set('token_sesion', cuerpo.access_token);",
+                  "  pm.collectionVariables.set('refresh_token', cuerpo.refresh_token);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Renovar el token · POST /auth/v1/token?grant_type=refresh_token",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{supabase_url}}/auth/v1/token?grant_type=refresh_token",
+              "host": [
+                "{{supabase_url}}"
+              ],
+              "path": [
+                "auth",
+                "v1",
+                "token"
+              ],
+              "query": [
+                {
+                  "key": "grant_type",
+                  "value": "refresh_token"
+                }
+              ]
+            },
+            "description": "Cuando vence el `access_token` (por defecto, 1 hora).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (cuerpo.access_token) {",
+                  "  pm.collectionVariables.set('token_sesion', cuerpo.access_token);",
+                  "  pm.collectionVariables.set('refresh_token', cuerpo.refresh_token);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Pedir código OTP (móvil) · POST /auth/v1/otp",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{supabase_url}}/auth/v1/otp",
+              "host": [
+                "{{supabase_url}}"
+              ],
+              "path": [
+                "auth",
+                "v1",
+                "otp"
+              ]
+            },
+            "description": "Envía al correo el código de 6 dígitos para entrar sin contraseña (app móvil).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"persona@correo.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Verificar código OTP · POST /auth/v1/verify",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{supabase_url}}/auth/v1/verify",
+              "host": [
+                "{{supabase_url}}"
+              ],
+              "path": [
+                "auth",
+                "v1",
+                "verify"
+              ]
+            },
+            "description": "Si el código es correcto, devuelve la sesión y la guarda.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"email\",\n  \"email\": \"persona@correo.com\",\n  \"token\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (cuerpo.access_token) {",
+                  "  pm.collectionVariables.set('token_sesion', cuerpo.access_token);",
+                  "  pm.collectionVariables.set('refresh_token', cuerpo.refresh_token);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Verificar código de recuperación (panel) · POST /auth/v1/verify",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{supabase_url}}/auth/v1/verify",
+              "host": [
+                "{{supabase_url}}"
+              ],
+              "path": [
+                "auth",
+                "v1",
+                "verify"
+              ]
+            },
+            "description": "Canjea el código que envía `Enviar código de recuperación` (Panel web). Devuelve una sesión y la guarda; con ella, `Cambiar contraseña`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"recovery\",\n  \"email\": \"admin@findfood.test\",\n  \"token\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (cuerpo.access_token) {",
+                  "  pm.collectionVariables.set('token_sesion', cuerpo.access_token);",
+                  "  pm.collectionVariables.set('refresh_token', cuerpo.refresh_token);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cambiar contraseña · PUT /auth/v1/user",
+          "request": {
+            "method": "PUT",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_sesion}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{supabase_url}}/auth/v1/user",
+              "host": [
+                "{{supabase_url}}"
+              ],
+              "path": [
+                "auth",
+                "v1",
+                "user"
+              ]
+            },
+            "description": "Con la sesión iniciada (`token_sesion`). Sirve para la recuperación y para cambiar la contraseña temporal del personal: al cambiarla, la API deja de exigir CAMBIAR_PASSWORD.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"password\": \"Nueva-Clave-2026\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Cerrar sesión · POST /auth/v1/logout",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_sesion}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "apikey",
+                "value": "{{supabase_anon_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{supabase_url}}/auth/v1/logout",
+              "host": [
+                "{{supabase_url}}"
+              ],
+              "path": [
+                "auth",
+                "v1",
+                "logout"
+              ]
+            },
+            "description": "Revoca el `refresh_token` de la sesión actual. El panel la llama si `Validar acceso al panel` responde 403."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Operación y salud",
+      "item": [
+        {
+          "name": "Salud · GET /health",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "`GET /health`\n\nPública: sin token."
+          }
+        },
+        {
+          "name": "Estado de las tareas programadas · GET /admin/tareas",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/tareas",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "tareas"
+              ]
+            },
+            "description": "`GET /v1/admin/tareas`\n\nRoles: ADMIN. Usa `{{token_admin}}`; cámbialo por el de otro rol permitido si lo necesitas."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Panel web (acceso y recuperación)",
+      "item": [
+        {
+          "name": "Validar acceso al panel · GET /panel/sesion",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/panel/sesion",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "panel",
+                "sesion"
+              ]
+            },
+            "description": "`GET /v1/panel/sesion`\n\nCualquier cuenta autenticada. Usa `{{token_admin}}`.\n\nLlamarla justo después del login: 200 con el perfil para ADMIN y ASESOR_BANCO; 403 `acceso-panel-denegado` para cualquier otro rol."
+          }
+        },
+        {
+          "name": "Enviar código de recuperación · POST /panel/recuperar-contrasena",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/panel/recuperar-contrasena",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "panel",
+                "recuperar-contrasena"
+              ]
+            },
+            "description": "`POST /v1/panel/recuperar-contrasena`\n\nPública: sin token.\n\nEnvía el código solo a cuentas ACTIVAS con rol ADMIN o ASESOR_BANCO. Responde siempre 202 con el mismo mensaje.\n\nCuerpo: `RecuperarContrasenaDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"persona@findfood.local\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Identidad: mi cuenta",
+      "item": [
+        {
+          "name": "Mi perfil · GET /me",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/me",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "me"
+              ]
+            },
+            "description": "`GET /v1/me`\n\nCualquier cuenta autenticada. Usa `{{token_admin}}`."
+          }
+        },
+        {
+          "name": "Completar o actualizar mi perfil · PATCH /me",
+          "request": {
+            "method": "PATCH",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/me",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "me"
+              ]
+            },
+            "description": "`PATCH /v1/me`\n\nCualquier cuenta autenticada. Usa `{{token_admin}}`.\n\nCuerpo: `ActualizarPerfilDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombres\": \"Nora\",\n  \"apellidos\": \"Pérez\",\n  \"telefono\": \"+573001234567\",\n  \"acepto_terminos\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Mi impacto · GET /me/impacto",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_donante}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/me/impacto",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "me",
+                "impacto"
+              ]
+            },
+            "description": "`GET /v1/me/impacto`\n\nRoles: DONANTE, VOLUNTARIO. Usa `{{token_donante}}`; cámbialo por el de otro rol permitido si lo necesitas."
+          }
+        },
+        {
+          "name": "Registrar dispositivo · POST /me/dispositivos",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_donante}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/me/dispositivos",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "me",
+                "dispositivos"
+              ]
+            },
+            "description": "`POST /v1/me/dispositivos`\n\nRoles: DONANTE, VOLUNTARIO. Usa `{{token_donante}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nCuerpo: `RegistrarDispositivoDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token_push\": \"ExponentPushToken[xxxxxxxxxxxxxxxx]\",\n  \"plataforma\": \"ANDROID\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (pm.response.code < 300 && cuerpo.id) pm.collectionVariables.set('dispositivo_id', cuerpo.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Eliminar dispositivo · DELETE /me/dispositivos/{id}",
+          "request": {
+            "method": "DELETE",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_donante}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/me/dispositivos/:id",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "me",
+                "dispositivos",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{dispositivo_id}}"
+                }
+              ]
+            },
+            "description": "`DELETE /v1/me/dispositivos/{id}`\n\nRoles: DONANTE, VOLUNTARIO. Usa `{{token_donante}}`; cámbialo por el de otro rol permitido si lo necesitas."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Notificaciones",
+      "item": [
+        {
+          "name": "Bandeja · GET /me/notificaciones",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/me/notificaciones",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "me",
+                "notificaciones"
+              ],
+              "query": [
+                {
+                  "key": "limite",
+                  "value": "20",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "desplazamiento",
+                  "value": "0",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "solo_no_leidas",
+                  "value": "false",
+                  "description": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "`GET /v1/me/notificaciones`\n\nCualquier cuenta autenticada. Usa `{{token_admin}}`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "const lista = Array.isArray(cuerpo) ? cuerpo : cuerpo.datos;",
+                  "if (lista?.[0]?.id && !pm.collectionVariables.get('notificacion_id')) pm.collectionVariables.set('notificacion_id', lista[0].id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Marcar todas como leídas · POST /me/notificaciones/leer-todas",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/me/notificaciones/leer-todas",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "me",
+                "notificaciones",
+                "leer-todas"
+              ]
+            },
+            "description": "`POST /v1/me/notificaciones/leer-todas`\n\nCualquier cuenta autenticada. Usa `{{token_admin}}`."
+          }
+        },
+        {
+          "name": "Marcar como leída · POST /me/notificaciones/{id}/leer",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/me/notificaciones/:id/leer",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "me",
+                "notificaciones",
+                ":id",
+                "leer"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{notificacion_id}}"
+                }
+              ]
+            },
+            "description": "`POST /v1/me/notificaciones/{id}/leer`\n\nCualquier cuenta autenticada. Usa `{{token_admin}}`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (pm.response.code < 300 && cuerpo.id) pm.collectionVariables.set('notificacion_id', cuerpo.id);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Catálogos",
+      "item": [
+        {
+          "name": "Catálogos · GET /catalogos",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/catalogos",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "catalogos"
+              ],
+              "query": [
+                {
+                  "key": "incluir",
+                  "value": "",
+                  "description": "Catálogos a devolver, separados por coma. Por defecto, todos. Valores: categorias_alimento, tipos_alimento, unidades_medida, tipos_vehiculo, motivos, tipos_incidencia, tipos_destino_distribucion",
+                  "disabled": true
+                },
+                {
+                  "key": "ambito",
+                  "value": "",
+                  "description": "Filtra los motivos por ámbito (p. ej. RECHAZO_ASIGNACION) · Valores: RECHAZO_ASIGNACION, ABANDONO_ASIGNACION, CANCELACION_DONACION, RECHAZO_RECEPCION, RECHAZO_VERIFICACION",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "`GET /v1/catalogos`\n\nCualquier cuenta autenticada. Usa `{{token_admin}}`."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Administración",
+      "item": [
+        {
+          "name": "Crear usuario · POST /admin/usuarios",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/usuarios",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "usuarios"
+              ]
+            },
+            "description": "`POST /v1/admin/usuarios`\n\nRoles: ADMIN. Usa `{{token_admin}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nCrea la cuenta en Supabase Auth con la service role key: necesita el proyecto real (con `start:local` responde 502).\n\nCuerpo: `CrearUsuarioInternoDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rol\": \"ASESOR_BANCO\",\n  \"email\": \"nuevo.asesor@findfood.local\",\n  \"nombres\": \"Nora\",\n  \"telefono\": \"+573001234567\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (pm.response.code < 300 && cuerpo.id) pm.collectionVariables.set('usuario_id', cuerpo.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar usuarios · GET /admin/usuarios",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/usuarios",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "usuarios"
+              ],
+              "query": [
+                {
+                  "key": "limite",
+                  "value": "20",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "desplazamiento",
+                  "value": "0",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "q",
+                  "value": "",
+                  "description": "Busca en correo, nombres y apellidos",
+                  "disabled": true
+                },
+                {
+                  "key": "estado",
+                  "value": "",
+                  "description": "Valores: PENDIENTE_CONFIRMACION, ACTIVO, SUSPENDIDO, INACTIVO",
+                  "disabled": true
+                },
+                {
+                  "key": "rol",
+                  "value": "",
+                  "description": "Valores: DONANTE, VOLUNTARIO, ASESOR_BANCO, ADMIN",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "`GET /v1/admin/usuarios`\n\nRoles: ADMIN. Usa `{{token_admin}}`; cámbialo por el de otro rol permitido si lo necesitas."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "const lista = Array.isArray(cuerpo) ? cuerpo : cuerpo.datos;",
+                  "if (lista?.[0]?.id && !pm.collectionVariables.get('usuario_id')) pm.collectionVariables.set('usuario_id', lista[0].id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Suspender · POST /admin/usuarios/{id}/suspender",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/usuarios/:id/suspender",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "usuarios",
+                ":id",
+                "suspender"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{usuario_id}}"
+                }
+              ]
+            },
+            "description": "`POST /v1/admin/usuarios/{id}/suspender`\n\nRoles: ADMIN. Usa `{{token_admin}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nCuerpo: `SuspenderDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"descripcion\": \"Descripción de prueba\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (pm.response.code < 300 && cuerpo.id) pm.collectionVariables.set('usuario_id', cuerpo.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reactivar · POST /admin/usuarios/{id}/reactivar",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/usuarios/:id/reactivar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "usuarios",
+                ":id",
+                "reactivar"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{usuario_id}}"
+                }
+              ]
+            },
+            "description": "`POST /v1/admin/usuarios/{id}/reactivar`\n\nRoles: ADMIN. Usa `{{token_admin}}`; cámbialo por el de otro rol permitido si lo necesitas."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (pm.response.code < 300 && cuerpo.id) pm.collectionVariables.set('usuario_id', cuerpo.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar verificaciones · GET /admin/verificaciones",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/verificaciones",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "verificaciones"
+              ],
+              "query": [
+                {
+                  "key": "limite",
+                  "value": "20",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "desplazamiento",
+                  "value": "0",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "estado",
+                  "value": "PENDIENTE",
+                  "description": "Valores: NO_INICIADA, PENDIENTE, APROBADA, RECHAZADA",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "`GET /v1/admin/verificaciones`\n\nRoles: ADMIN. Usa `{{token_admin}}`; cámbialo por el de otro rol permitido si lo necesitas."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "const lista = Array.isArray(cuerpo) ? cuerpo : cuerpo.datos;",
+                  "if (lista?.[0]?.id && !pm.collectionVariables.get('verificacion_id')) pm.collectionVariables.set('verificacion_id', lista[0].id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Detalle de verificación · GET /admin/verificaciones/{id}",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/verificaciones/:id",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "verificaciones",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{verificacion_id}}"
+                }
+              ]
+            },
+            "description": "`GET /v1/admin/verificaciones/{id}`\n\nRoles: ADMIN. Usa `{{token_admin}}`; cámbialo por el de otro rol permitido si lo necesitas."
+          }
+        },
+        {
+          "name": "Aprobar · POST /admin/verificaciones/{id}/aprobar",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/verificaciones/:id/aprobar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "verificaciones",
+                ":id",
+                "aprobar"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{verificacion_id}}"
+                }
+              ]
+            },
+            "description": "`POST /v1/admin/verificaciones/{id}/aprobar`\n\nRoles: ADMIN. Usa `{{token_admin}}`; cámbialo por el de otro rol permitido si lo necesitas."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (pm.response.code < 300 && cuerpo.id) pm.collectionVariables.set('verificacion_id', cuerpo.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rechazar · POST /admin/verificaciones/{id}/rechazar",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/verificaciones/:id/rechazar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "verificaciones",
+                ":id",
+                "rechazar"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{verificacion_id}}"
+                }
+              ]
+            },
+            "description": "`POST /v1/admin/verificaciones/{id}/rechazar`\n\nRoles: ADMIN. Usa `{{token_admin}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nCuerpo: `RechazarVerificacionDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"motivo_id\": {{motivo_rechazo_verificacion}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (pm.response.code < 300 && cuerpo.id) pm.collectionVariables.set('verificacion_id', cuerpo.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Parámetros · GET /admin/parametros",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/parametros",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "parametros"
+              ]
+            },
+            "description": "`GET /v1/admin/parametros`\n\nRoles: ADMIN. Usa `{{token_admin}}`; cámbialo por el de otro rol permitido si lo necesitas."
+          }
+        },
+        {
+          "name": "Cambiar parámetro · PUT /admin/parametros/{clave}",
+          "request": {
+            "method": "PUT",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/parametros/:clave",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "parametros",
+                ":clave"
+              ],
+              "variable": [
+                {
+                  "key": "clave",
+                  "value": "PESO_PROXIMIDAD"
+                }
+              ]
+            },
+            "description": "`PUT /v1/admin/parametros/{clave}`\n\nRoles: ADMIN. Usa `{{token_admin}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nCuerpo: `ActualizarParametroDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"valor\": \"0.35\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Ver banco · GET /admin/banco",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/banco",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "banco"
+              ]
+            },
+            "description": "`GET /v1/admin/banco`\n\nRoles: ADMIN. Usa `{{token_admin}}`; cámbialo por el de otro rol permitido si lo necesitas."
+          }
+        },
+        {
+          "name": "Guardar banco · PUT /admin/banco",
+          "request": {
+            "method": "PUT",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/banco",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "banco"
+              ]
+            },
+            "description": "`PUT /v1/admin/banco`\n\nRoles: ADMIN. Usa `{{token_admin}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nCuerpo: `BancoDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Banco de Alimentos de Bogotá\",\n  \"direccion\": \"Calle 19 # 32-50\",\n  \"ciudad\": \"Bogotá\",\n  \"ubicacion\": {\n    \"lat\": 4.6533,\n    \"lng\": -74.0836\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Crear tipo alimento · POST /admin/tipos-alimento",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/tipos-alimento",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "tipos-alimento"
+              ]
+            },
+            "description": "`POST /v1/admin/tipos-alimento`\n\nRoles: ADMIN. Usa `{{token_admin}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nCuerpo: `TipoAlimentoDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"categoria_alimento_id\": 1,\n  \"unidad_medida_id\": {{unidad_kg}},\n  \"codigo\": \"FRIJOL\",\n  \"nombre\": \"Fríjol\",\n  \"requiere_refrigeracion\": false,\n  \"tipo_almacenamiento\": \"SECO\",\n  \"perecedero\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (pm.response.code < 300 && cuerpo.id) pm.collectionVariables.set('tipo_alimento_id', cuerpo.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar tipo alimento · PATCH /admin/tipos-alimento/{id}",
+          "request": {
+            "method": "PATCH",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/tipos-alimento/:id",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "tipos-alimento",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{tipo_alimento_id}}"
+                }
+              ]
+            },
+            "description": "`PATCH /v1/admin/tipos-alimento/{id}`\n\nRoles: ADMIN. Usa `{{token_admin}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nCuerpo: `ActualizarTipoAlimentoDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Fríjol\",\n  \"requiere_refrigeracion\": false,\n  \"tipo_almacenamiento\": \"SECO\",\n  \"perecedero\": false,\n  \"vida_util_dias\": 30,\n  \"activo\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Voluntario",
+      "item": [
+        {
+          "name": "Solicitar ser voluntario · POST /voluntario/solicitud",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_donante}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/voluntario/solicitud",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "voluntario",
+                "solicitud"
+              ]
+            },
+            "description": "`POST /v1/voluntario/solicitud`\n\nRoles: DONANTE. Usa `{{token_donante}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nUsa archivos del bucket `documentos-identidad` (URL de subida con DOCUMENTO_IDENTIDAD y VEHICULO, token del mismo donante). El ADMIN los ve en el detalle de verificación con URLs de 60 s.\n\nCuerpo: `SolicitudVoluntarioDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tipo_vehiculo_id\": {{vehiculo_automovil}},\n  \"placa_vehiculo\": \"ABC123\",\n  \"url_foto_vehiculo\": \"{{ruta_archivo}}\",\n  \"capacidad_carga_kg\": 500,\n  \"tiene_refrigeracion\": false,\n  \"fecha_nacimiento\": \"1995-04-12\",\n  \"ubicacion_base\": {\n    \"lat\": 4.6533,\n    \"lng\": -74.0836\n  },\n  \"documento_frente\": \"{{ruta_archivo}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Reemplazar franjas de disponibilidad · PUT /voluntario/disponibilidad",
+          "request": {
+            "method": "PUT",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_voluntario}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/voluntario/disponibilidad",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "voluntario",
+                "disponibilidad"
+              ]
+            },
+            "description": "`PUT /v1/voluntario/disponibilidad`\n\nRoles: VOLUNTARIO. Usa `{{token_voluntario}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nCuerpo: `DisponibilidadDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"franjas\": [\n    {\n      \"dia_semana\": 1,\n      \"hora_inicio\": \"08:00\",\n      \"hora_fin\": \"12:00\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Interruptor de disponibilidad · PATCH /voluntario/estado",
+          "request": {
+            "method": "PATCH",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_voluntario}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/voluntario/estado",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "voluntario",
+                "estado"
+              ]
+            },
+            "description": "`PATCH /v1/voluntario/estado`\n\nRoles: VOLUNTARIO. Usa `{{token_voluntario}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nCuerpo: `EstadoVoluntarioDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"disponible\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Registrar ubicación · POST /voluntario/ubicacion",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_voluntario}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/voluntario/ubicacion",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "voluntario",
+                "ubicacion"
+              ]
+            },
+            "description": "`POST /v1/voluntario/ubicacion`\n\nRoles: VOLUNTARIO. Usa `{{token_voluntario}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nCuerpo: `UbicacionVoluntarioDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lat\": 4.6533,\n  \"lng\": -74.0836\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Donaciones",
+      "item": [
+        {
+          "name": "Crear · POST /donaciones",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_donante}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/donaciones",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "donaciones"
+              ]
+            },
+            "description": "`POST /v1/donaciones`\n\nRoles: DONANTE. Usa `{{token_donante}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nPara probar el bucket `donaciones`, agrega `ruta_foto: \"{{ruta_archivo}}\"` a un producto (URL de subida con PRODUCTO y token del donante). El detalle devuelve `foto_url` firmada por 300 s.\n\nCuerpo: `CrearDonacionDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"titulo\": \"Excedente de panadería\",\n  \"descripcion\": \"Descripción de prueba\",\n  \"ventana_recogida_inicio\": \"{{ventana_inicio}}\",\n  \"ventana_recogida_fin\": \"{{ventana_fin}}\",\n  \"direccion_recogida\": \"Calle 72 # 10-34\",\n  \"ubicacion_recogida\": {\n    \"lat\": 4.6533,\n    \"lng\": -74.0836\n  },\n  \"items\": [\n    {\n      \"tipo_alimento_id\": {{tipo_arroz}},\n      \"cantidad\": 10,\n      \"peso_estimado_kg\": 10,\n      \"fecha_vencimiento\": \"{{fecha_en_90_dias}}\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (pm.response.code < 300 && cuerpo.id) pm.collectionVariables.set('donacion_id', cuerpo.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar · GET /donaciones",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_donante}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/donaciones",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "donaciones"
+              ],
+              "query": [
+                {
+                  "key": "limite",
+                  "value": "20",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "desplazamiento",
+                  "value": "0",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "estado",
+                  "value": "",
+                  "description": "Valores: BORRADOR, PUBLICADA, ASIGNADA, EN_RECOLECCION, EN_TRANSITO, ENTREGADA, RECIBIDA, RECHAZADA, CANCELADA, EXPIRADA",
+                  "disabled": true
+                },
+                {
+                  "key": "almacen_id",
+                  "value": "",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "desde",
+                  "value": "",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "hasta",
+                  "value": "",
+                  "description": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "`GET /v1/donaciones`\n\nRoles: DONANTE, ADMIN, ASESOR_BANCO. Usa `{{token_donante}}`; cámbialo por el de otro rol permitido si lo necesitas."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "const lista = Array.isArray(cuerpo) ? cuerpo : cuerpo.datos;",
+                  "if (lista?.[0]?.id && !pm.collectionVariables.get('donacion_id')) pm.collectionVariables.set('donacion_id', lista[0].id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Detalle · GET /donaciones/{id}",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/donaciones/:id",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "donaciones",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{donacion_id}}"
+                }
+              ]
+            },
+            "description": "`GET /v1/donaciones/{id}`\n\nCualquier cuenta autenticada. Usa `{{token_admin}}`.\n\nGuarda el id del primer producto en `donacion_item_id`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (cuerpo.items?.[0]?.id) pm.collectionVariables.set('donacion_item_id', cuerpo.items[0].id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar · PATCH /donaciones/{id}",
+          "request": {
+            "method": "PATCH",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_donante}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/donaciones/:id",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "donaciones",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{donacion_id}}"
+                }
+              ]
+            },
+            "description": "`PATCH /v1/donaciones/{id}`\n\nRoles: DONANTE. Usa `{{token_donante}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nCuerpo: `ActualizarDonacionDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"titulo\": \"Excedente de panadería\",\n  \"descripcion\": \"Descripción de prueba\",\n  \"ventana_recogida_inicio\": \"{{ventana_inicio}}\",\n  \"ventana_recogida_fin\": \"{{ventana_fin}}\",\n  \"direccion_recogida\": \"Calle 72 # 10-34\",\n  \"referencia_recogida\": \"Portería principal\",\n  \"ubicacion_recogida\": {\n    \"lat\": 4.6533,\n    \"lng\": -74.0836\n  },\n  \"contacto_nombre\": \"Nora Pérez\",\n  \"contacto_telefono\": \"+573001234567\",\n  \"items\": [\n    {\n      \"tipo_alimento_id\": {{tipo_arroz}},\n      \"cantidad\": 10,\n      \"peso_estimado_kg\": 10,\n      \"fecha_vencimiento\": \"{{fecha_en_90_dias}}\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Publicar · POST /donaciones/{id}/publicar",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_donante}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/donaciones/:id/publicar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "donaciones",
+                ":id",
+                "publicar"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{donacion_id}}"
+                }
+              ]
+            },
+            "description": "`POST /v1/donaciones/{id}/publicar`\n\nRoles: DONANTE. Usa `{{token_donante}}`; cámbialo por el de otro rol permitido si lo necesitas."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (pm.response.code < 300 && cuerpo.id) pm.collectionVariables.set('donacion_id', cuerpo.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cancelar · POST /donaciones/{id}/cancelar",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_donante}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/donaciones/:id/cancelar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "donaciones",
+                ":id",
+                "cancelar"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{donacion_id}}"
+                }
+              ]
+            },
+            "description": "`POST /v1/donaciones/{id}/cancelar`\n\nRoles: DONANTE, ADMIN. Usa `{{token_donante}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nCuerpo: `CancelarDonacionDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"motivo_id\": {{motivo_cancelacion}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (pm.response.code < 300 && cuerpo.id) pm.collectionVariables.set('donacion_id', cuerpo.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reasignar · POST /donaciones/{id}/reasignar",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/donaciones/:id/reasignar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "donaciones",
+                ":id",
+                "reasignar"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{donacion_id}}"
+                }
+              ]
+            },
+            "description": "`POST /v1/donaciones/{id}/reasignar`\n\nRoles: ADMIN, ASESOR_BANCO. Usa `{{token_admin}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nCuerpo: `ReasignarDonacionDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"observacion\": \"Observación de prueba\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (pm.response.code < 300 && cuerpo.id) pm.collectionVariables.set('donacion_id', cuerpo.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Historial · GET /donaciones/{id}/historial",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_donante}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/donaciones/:id/historial",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "donaciones",
+                ":id",
+                "historial"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{donacion_id}}"
+                }
+              ]
+            },
+            "description": "`GET /v1/donaciones/{id}/historial`\n\nRoles: DONANTE, ADMIN, ASESOR_BANCO. Usa `{{token_donante}}`; cámbialo por el de otro rol permitido si lo necesitas."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "const lista = Array.isArray(cuerpo) ? cuerpo : cuerpo.datos;",
+                  "if (lista?.[0]?.id && !pm.collectionVariables.get('donacion_id')) pm.collectionVariables.set('donacion_id', lista[0].id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Candidatos · GET /donaciones/{id}/candidatos",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/donaciones/:id/candidatos",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "donaciones",
+                ":id",
+                "candidatos"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{donacion_id}}"
+                }
+              ]
+            },
+            "description": "`GET /v1/donaciones/{id}/candidatos`\n\nRoles: ADMIN, ASESOR_BANCO. Usa `{{token_admin}}`; cámbialo por el de otro rol permitido si lo necesitas."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "const lista = Array.isArray(cuerpo) ? cuerpo : cuerpo.datos;",
+                  "if (lista?.[0]?.id && !pm.collectionVariables.get('donacion_id')) pm.collectionVariables.set('donacion_id', lista[0].id);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Asignaciones (ofertas)",
+      "item": [
+        {
+          "name": "Mis ofertas · GET /asignaciones/ofertas",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_voluntario}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/asignaciones/ofertas",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "asignaciones",
+                "ofertas"
+              ]
+            },
+            "description": "`GET /v1/asignaciones/ofertas`\n\nRoles: VOLUNTARIO. Usa `{{token_voluntario}}`; cámbialo por el de otro rol permitido si lo necesitas."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (Array.isArray(cuerpo) && cuerpo[0]) {",
+                  "  pm.collectionVariables.set('oferta_id', cuerpo[0].id);",
+                  "  pm.collectionVariables.set('donacion_id', cuerpo[0].donacion_id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Aceptar · POST /asignaciones/{id}/aceptar",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_voluntario}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/asignaciones/:id/aceptar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "asignaciones",
+                ":id",
+                "aceptar"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{oferta_id}}"
+                }
+              ]
+            },
+            "description": "`POST /v1/asignaciones/{id}/aceptar`\n\nRoles: VOLUNTARIO. Usa `{{token_voluntario}}`; cámbialo por el de otro rol permitido si lo necesitas."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (pm.response.code < 300 && cuerpo.id) pm.collectionVariables.set('oferta_id', cuerpo.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rechazar · POST /asignaciones/{id}/rechazar",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_voluntario}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/asignaciones/:id/rechazar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "asignaciones",
+                ":id",
+                "rechazar"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{oferta_id}}"
+                }
+              ]
+            },
+            "description": "`POST /v1/asignaciones/{id}/rechazar`\n\nRoles: VOLUNTARIO. Usa `{{token_voluntario}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nCuerpo: `RespuestaConMotivoDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"motivo_id\": {{motivo_rechazo_asignacion}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (pm.response.code < 300 && cuerpo.id) pm.collectionVariables.set('oferta_id', cuerpo.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Abandonar · POST /asignaciones/{id}/abandonar",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_voluntario}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/asignaciones/:id/abandonar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "asignaciones",
+                ":id",
+                "abandonar"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{oferta_id}}"
+                }
+              ]
+            },
+            "description": "`POST /v1/asignaciones/{id}/abandonar`\n\nRoles: VOLUNTARIO. Usa `{{token_voluntario}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nCuerpo: `RespuestaConMotivoDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"motivo_id\": {{motivo_abandono}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (pm.response.code < 300 && cuerpo.id) pm.collectionVariables.set('oferta_id', cuerpo.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Calificar · POST /asignaciones/{id}/calificacion",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_donante}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/asignaciones/:id/calificacion",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "asignaciones",
+                ":id",
+                "calificacion"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{oferta_id}}"
+                }
+              ]
+            },
+            "description": "`POST /v1/asignaciones/{id}/calificacion`\n\nRoles: DONANTE, VOLUNTARIO. Usa `{{token_donante}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nCuerpo: `CalificacionDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"puntaje\": 5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (pm.response.code < 300 && cuerpo.id) pm.collectionVariables.set('oferta_id', cuerpo.id);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Rutas y paradas",
+      "item": [
+        {
+          "name": "Rutas",
+          "item": [
+            {
+              "name": "Crear · POST /rutas",
+              "request": {
+                "method": "POST",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{token_voluntario}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/v1/rutas",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "rutas"
+                  ]
+                },
+                "description": "`POST /v1/rutas`\n\nRoles: VOLUNTARIO, ASESOR_BANCO. Usa `{{token_voluntario}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nCuerpo: `CrearRutaDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"donacion_ids\": [\n    \"{{donacion_id}}\"\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const cuerpo = pm.response.json();",
+                      "if (pm.response.code < 300 && cuerpo.id) pm.collectionVariables.set('ruta_id', cuerpo.id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Listar · GET /rutas",
+              "request": {
+                "method": "GET",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{token_voluntario}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/rutas",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "rutas"
+                  ],
+                  "query": [
+                    {
+                      "key": "limite",
+                      "value": "20",
+                      "description": "",
+                      "disabled": true
+                    },
+                    {
+                      "key": "desplazamiento",
+                      "value": "0",
+                      "description": "",
+                      "disabled": true
+                    },
+                    {
+                      "key": "estado",
+                      "value": "",
+                      "description": "Valores: PLANIFICADA, EN_CURSO, COMPLETADA, CANCELADA",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "`GET /v1/rutas`\n\nRoles: VOLUNTARIO, ASESOR_BANCO, ADMIN. Usa `{{token_voluntario}}`; cámbialo por el de otro rol permitido si lo necesitas."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const cuerpo = pm.response.json();",
+                      "const lista = Array.isArray(cuerpo) ? cuerpo : cuerpo.datos;",
+                      "if (lista?.[0]?.id && !pm.collectionVariables.get('ruta_id')) pm.collectionVariables.set('ruta_id', lista[0].id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Detalle · GET /rutas/{id}",
+              "request": {
+                "method": "GET",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{token_voluntario}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/rutas/:id",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "rutas",
+                    ":id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{ruta_id}}"
+                    }
+                  ]
+                },
+                "description": "`GET /v1/rutas/{id}`\n\nRoles: VOLUNTARIO, ASESOR_BANCO, ADMIN. Usa `{{token_voluntario}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nGuarda el id de la primera parada en `parada_id`."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const cuerpo = pm.response.json();",
+                      "if (cuerpo.paradas?.[0]?.id) pm.collectionVariables.set('parada_id', cuerpo.paradas[0].id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Iniciar · POST /rutas/{id}/iniciar",
+              "request": {
+                "method": "POST",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{token_voluntario}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/rutas/:id/iniciar",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "rutas",
+                    ":id",
+                    "iniciar"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{ruta_id}}"
+                    }
+                  ]
+                },
+                "description": "`POST /v1/rutas/{id}/iniciar`\n\nRoles: VOLUNTARIO, ASESOR_BANCO. Usa `{{token_voluntario}}`; cámbialo por el de otro rol permitido si lo necesitas."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const cuerpo = pm.response.json();",
+                      "if (pm.response.code < 300 && cuerpo.id) pm.collectionVariables.set('ruta_id', cuerpo.id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Cancelar · POST /rutas/{id}/cancelar",
+              "request": {
+                "method": "POST",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{token_voluntario}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/rutas/:id/cancelar",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "rutas",
+                    ":id",
+                    "cancelar"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{ruta_id}}"
+                    }
+                  ]
+                },
+                "description": "`POST /v1/rutas/{id}/cancelar`\n\nRoles: VOLUNTARIO, ASESOR_BANCO, ADMIN. Usa `{{token_voluntario}}`; cámbialo por el de otro rol permitido si lo necesitas."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const cuerpo = pm.response.json();",
+                      "if (pm.response.code < 300 && cuerpo.id) pm.collectionVariables.set('ruta_id', cuerpo.id);"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Paradas",
+          "item": [
+            {
+              "name": "Llegada · POST /paradas/{id}/llegada",
+              "request": {
+                "method": "POST",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{token_voluntario}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/v1/paradas/:id/llegada",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "paradas",
+                    ":id",
+                    "llegada"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{parada_id}}"
+                    }
+                  ]
+                },
+                "description": "`POST /v1/paradas/{id}/llegada`\n\nRoles: VOLUNTARIO, ASESOR_BANCO. Usa `{{token_voluntario}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nCuerpo: `LlegadaParadaDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"ubicacion\": {\n    \"lat\": 4.6533,\n    \"lng\": -74.0836\n  }\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const cuerpo = pm.response.json();",
+                      "if (pm.response.code < 300 && cuerpo.id) pm.collectionVariables.set('parada_id', cuerpo.id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Confirmar · POST /paradas/{id}/confirmar",
+              "request": {
+                "method": "POST",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{token_voluntario}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/v1/paradas/:id/confirmar",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "paradas",
+                    ":id",
+                    "confirmar"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{parada_id}}"
+                    }
+                  ]
+                },
+                "description": "`POST /v1/paradas/{id}/confirmar`\n\nRoles: VOLUNTARIO, ASESOR_BANCO. Usa `{{token_voluntario}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nCuerpo: `ConfirmarParadaDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"peso_confirmado_kg\": 10,\n  \"ubicacion\": {\n    \"lat\": 4.6533,\n    \"lng\": -74.0836\n  },\n  \"confirmada_en_dispositivo\": \"{{$isoTimestamp}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const cuerpo = pm.response.json();",
+                      "if (pm.response.code < 300 && cuerpo.id) pm.collectionVariables.set('parada_id', cuerpo.id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Fallida · POST /paradas/{id}/fallida",
+              "request": {
+                "method": "POST",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{token_voluntario}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/v1/paradas/:id/fallida",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "paradas",
+                    ":id",
+                    "fallida"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{parada_id}}"
+                    }
+                  ]
+                },
+                "description": "`POST /v1/paradas/{id}/fallida`\n\nRoles: VOLUNTARIO, ASESOR_BANCO. Usa `{{token_voluntario}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nCuerpo: `ParadaFallidaDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"tipo_incidencia_id\": {{tipo_incidencia_ausente}},\n  \"descripcion\": \"Descripción de prueba\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const cuerpo = pm.response.json();",
+                      "if (pm.response.code < 300 && cuerpo.id) pm.collectionVariables.set('parada_id', cuerpo.id);"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Evidencias",
+      "item": [
+        {
+          "name": "URL de subida · POST /evidencias/upload-url",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_voluntario}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/evidencias/upload-url",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "evidencias",
+                "upload-url"
+              ]
+            },
+            "description": "`POST /v1/evidencias/upload-url`\n\nCualquier cuenta autenticada. Usa `{{token_voluntario}}`.\n\nEl `proposito` elige el bucket: EVIDENCIA → `evidencias`, PRODUCTO → `donaciones`, DOCUMENTO_IDENTIDAD y VEHICULO → `documentos-identidad`. Guarda `ruta_archivo` y `url_subida`. Pídela con el token de quien va a usar el archivo: la API solo acepta rutas subidas por esa misma cuenta.\n\nCuerpo: `SolicitarSubidaDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"proposito\": \"EVIDENCIA\",\n  \"extension\": \"jpg\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (cuerpo.ruta) pm.collectionVariables.set('ruta_archivo', cuerpo.ruta);",
+                  "if (cuerpo.url_subida) pm.collectionVariables.set('url_subida', cuerpo.url_subida);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Subir archivo a Storage · PUT {{url_subida}}",
+          "request": {
+            "method": "PUT",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "image/jpeg"
+              }
+            ],
+            "url": {
+              "raw": "{{url_subida}}",
+              "host": [
+                "{{url_subida}}"
+              ]
+            },
+            "body": {
+              "mode": "file",
+              "file": {
+                "src": ""
+              }
+            },
+            "description": "Sube el binario directo a Supabase Storage con la URL firmada (no pasa por la API). En Body → binary elige el archivo y ajusta `Content-Type` (`image/jpeg`, `image/png`, `image/webp`, `image/heic` o `application/pdf`).\n\nSolo funciona con la API contra el proyecto real (`npm run start:dev`): con `STORAGE_SIMULADO=true` la URL es ficticia y la API da todo archivo por subido."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('archivo subido', () => pm.expect(pm.response.code).to.be.below(300));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Registrar · POST /evidencias",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_voluntario}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/evidencias",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "evidencias"
+              ]
+            },
+            "description": "`POST /v1/evidencias`\n\nCualquier cuenta autenticada. Usa `{{token_voluntario}}`.\n\nAntes: `URL de subida` y `Subir archivo a Storage`. Con `tipo: PUBLICACION` y `donacion_id` la puede registrar el donante sobre su propia donación; RECOGIDA y ENTREGA exigen ser el voluntario de la parada.\n\nCuerpo: `RegistrarEvidenciaDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"parada_id\": \"{{parada_id}}\",\n  \"id\": \"{{$guid}}\",\n  \"tipo\": \"RECOGIDA\",\n  \"ruta\": \"{{ruta_archivo}}\",\n  \"capturada_at\": \"{{$isoTimestamp}}\",\n  \"ubicacion\": {\n    \"lat\": 4.6533,\n    \"lng\": -74.0836\n  },\n  \"mime_type\": \"image/jpeg\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Listar · GET /evidencias",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_voluntario}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/evidencias",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "evidencias"
+              ],
+              "query": [
+                {
+                  "key": "donacion_id",
+                  "value": "",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "parada_id",
+                  "value": "",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "recepcion_id",
+                  "value": "",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "incidencia_id",
+                  "value": "",
+                  "description": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "`GET /v1/evidencias`\n\nCualquier cuenta autenticada. Usa `{{token_voluntario}}`."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Incidencias",
+      "item": [
+        {
+          "name": "Crear · POST /incidencias",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_voluntario}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/incidencias",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "incidencias"
+              ]
+            },
+            "description": "`POST /v1/incidencias`\n\nCualquier cuenta autenticada. Usa `{{token_voluntario}}`.\n\nCuerpo: `CrearIncidenciaDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tipo_incidencia_id\": {{tipo_incidencia_ausente}},\n  \"descripcion\": \"Descripción de prueba\",\n  \"nivel\": \"BAJA\",\n  \"donacion_id\": \"{{donacion_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (pm.response.code < 300 && cuerpo.id) pm.collectionVariables.set('incidencia_id', cuerpo.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar · GET /incidencias",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/incidencias",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "incidencias"
+              ],
+              "query": [
+                {
+                  "key": "limite",
+                  "value": "20",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "desplazamiento",
+                  "value": "0",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "estado",
+                  "value": "",
+                  "description": "Valores: ABIERTA, EN_REVISION, RESUELTA, CERRADA",
+                  "disabled": true
+                },
+                {
+                  "key": "donacion_id",
+                  "value": "",
+                  "description": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "`GET /v1/incidencias`\n\nCualquier cuenta autenticada. Usa `{{token_admin}}`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "const lista = Array.isArray(cuerpo) ? cuerpo : cuerpo.datos;",
+                  "if (lista?.[0]?.id && !pm.collectionVariables.get('incidencia_id')) pm.collectionVariables.set('incidencia_id', lista[0].id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Detalle · GET /incidencias/{id}",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/incidencias/:id",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "incidencias",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{incidencia_id}}"
+                }
+              ]
+            },
+            "description": "`GET /v1/incidencias/{id}`\n\nCualquier cuenta autenticada. Usa `{{token_admin}}`."
+          }
+        },
+        {
+          "name": "Revisar · POST /incidencias/{id}/revisar",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/incidencias/:id/revisar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "incidencias",
+                ":id",
+                "revisar"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{incidencia_id}}"
+                }
+              ]
+            },
+            "description": "`POST /v1/incidencias/{id}/revisar`\n\nRoles: ADMIN, ASESOR_BANCO. Usa `{{token_admin}}`; cámbialo por el de otro rol permitido si lo necesitas."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (pm.response.code < 300 && cuerpo.id) pm.collectionVariables.set('incidencia_id', cuerpo.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Resolver · POST /incidencias/{id}/resolver",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/incidencias/:id/resolver",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "incidencias",
+                ":id",
+                "resolver"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{incidencia_id}}"
+                }
+              ]
+            },
+            "description": "`POST /v1/incidencias/{id}/resolver`\n\nRoles: ADMIN. Usa `{{token_admin}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nCuerpo: `ResolverIncidenciaDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"resolucion\": \"Se contactó al donante y se reprogramó\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const cuerpo = pm.response.json();",
+                  "if (pm.response.code < 300 && cuerpo.id) pm.collectionVariables.set('incidencia_id', cuerpo.id);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Inventario",
+      "item": [
+        {
+          "name": "Sedes",
+          "item": [
+            {
+              "name": "Listar · GET /almacenes",
+              "request": {
+                "method": "GET",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{token_asesor}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/almacenes",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "almacenes"
+                  ]
+                },
+                "description": "`GET /v1/almacenes`\n\nRoles: ASESOR_BANCO, ADMIN. Usa `{{token_asesor}}`; cámbialo por el de otro rol permitido si lo necesitas."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const cuerpo = pm.response.json();",
+                      "const lista = Array.isArray(cuerpo) ? cuerpo : cuerpo.datos;",
+                      "if (lista?.[0]?.id && !pm.collectionVariables.get('sede_id')) pm.collectionVariables.set('sede_id', lista[0].id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Crear · POST /almacenes",
+              "request": {
+                "method": "POST",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{token_admin}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/v1/almacenes",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "almacenes"
+                  ]
+                },
+                "description": "`POST /v1/almacenes`\n\nRoles: ADMIN. Usa `{{token_admin}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nCuerpo: `CrearAlmacenDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"nombre\": \"Sede Sur\",\n  \"direccion\": \"Avenida 1 de Mayo # 30-10\",\n  \"ubicacion\": {\n    \"lat\": 4.6533,\n    \"lng\": -74.0836\n  },\n  \"tipo\": \"SECO\",\n  \"capacidad_kg\": 1000\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const cuerpo = pm.response.json();",
+                      "if (pm.response.code < 300 && cuerpo.id) pm.collectionVariables.set('sede_id', cuerpo.id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Actualizar · PATCH /almacenes/{id}",
+              "request": {
+                "method": "PATCH",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{token_asesor}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/v1/almacenes/:id",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "almacenes",
+                    ":id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{sede_id}}"
+                    }
+                  ]
+                },
+                "description": "`PATCH /v1/almacenes/{id}`\n\nRoles: ASESOR_BANCO, ADMIN. Usa `{{token_asesor}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nCuerpo: `ActualizarAlmacenDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"activo\": true,\n  \"nombre\": \"Sede Sur\",\n  \"capacidad_kg\": 1000\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Recepciones",
+          "item": [
+            {
+              "name": "Crear · POST /recepciones",
+              "request": {
+                "method": "POST",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{token_asesor}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/v1/recepciones",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "recepciones"
+                  ]
+                },
+                "description": "`POST /v1/recepciones`\n\nRoles: ASESOR_BANCO. Usa `{{token_asesor}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nCuerpo: `CrearRecepcionDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"donacion_id\": \"{{donacion_id}}\",\n  \"estado\": \"ACEPTADA\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const cuerpo = pm.response.json();",
+                      "if (pm.response.code < 300 && cuerpo.id) pm.collectionVariables.set('recepcion_id', cuerpo.id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Listar · GET /recepciones",
+              "request": {
+                "method": "GET",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{token_asesor}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/recepciones",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "recepciones"
+                  ],
+                  "query": [
+                    {
+                      "key": "limite",
+                      "value": "20",
+                      "description": "",
+                      "disabled": true
+                    },
+                    {
+                      "key": "desplazamiento",
+                      "value": "0",
+                      "description": "",
+                      "disabled": true
+                    },
+                    {
+                      "key": "almacen_id",
+                      "value": "",
+                      "description": "",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "`GET /v1/recepciones`\n\nRoles: ASESOR_BANCO, ADMIN. Usa `{{token_asesor}}`; cámbialo por el de otro rol permitido si lo necesitas."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const cuerpo = pm.response.json();",
+                      "const lista = Array.isArray(cuerpo) ? cuerpo : cuerpo.datos;",
+                      "if (lista?.[0]?.id && !pm.collectionVariables.get('recepcion_id')) pm.collectionVariables.set('recepcion_id', lista[0].id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Detalle · GET /recepciones/{id}",
+              "request": {
+                "method": "GET",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{token_asesor}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/recepciones/:id",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "recepciones",
+                    ":id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{recepcion_id}}"
+                    }
+                  ]
+                },
+                "description": "`GET /v1/recepciones/{id}`\n\nRoles: ASESOR_BANCO, ADMIN. Usa `{{token_asesor}}`; cámbialo por el de otro rol permitido si lo necesitas."
+              }
+            }
+          ]
+        },
+        {
+          "name": "Lotes",
+          "item": [
+            {
+              "name": "Listar · GET /inventario/lotes",
+              "request": {
+                "method": "GET",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{token_asesor}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/inventario/lotes",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "inventario",
+                    "lotes"
+                  ],
+                  "query": [
+                    {
+                      "key": "limite",
+                      "value": "20",
+                      "description": "",
+                      "disabled": true
+                    },
+                    {
+                      "key": "desplazamiento",
+                      "value": "0",
+                      "description": "",
+                      "disabled": true
+                    },
+                    {
+                      "key": "almacen_id",
+                      "value": "",
+                      "description": "",
+                      "disabled": true
+                    },
+                    {
+                      "key": "tipo_alimento_id",
+                      "value": "",
+                      "description": "",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "`GET /v1/inventario/lotes`\n\nRoles: ASESOR_BANCO, ADMIN. Usa `{{token_asesor}}`; cámbialo por el de otro rol permitido si lo necesitas."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const cuerpo = pm.response.json();",
+                      "const lista = Array.isArray(cuerpo) ? cuerpo : cuerpo.datos;",
+                      "if (lista?.[0]?.id && !pm.collectionVariables.get('lote_id')) pm.collectionVariables.set('lote_id', lista[0].id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Detalle · GET /inventario/lotes/{id}",
+              "request": {
+                "method": "GET",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{token_asesor}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/inventario/lotes/:id",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "inventario",
+                    "lotes",
+                    ":id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{lote_id}}"
+                    }
+                  ]
+                },
+                "description": "`GET /v1/inventario/lotes/{id}`\n\nRoles: ASESOR_BANCO, ADMIN. Usa `{{token_asesor}}`; cámbialo por el de otro rol permitido si lo necesitas."
+              }
+            },
+            {
+              "name": "Ajuste de lote · POST /inventario/lotes/{id}/ajuste",
+              "request": {
+                "method": "POST",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{token_asesor}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/v1/inventario/lotes/:id/ajuste",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "inventario",
+                    "lotes",
+                    ":id",
+                    "ajuste"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{lote_id}}"
+                    }
+                  ]
+                },
+                "description": "`POST /v1/inventario/lotes/{id}/ajuste`\n\nRoles: ASESOR_BANCO. Usa `{{token_asesor}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nCuerpo: `AjusteLoteDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"tipo\": \"AJUSTE\",\n  \"cantidad\": 10,\n  \"motivo\": \"Conteo físico del lote\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const cuerpo = pm.response.json();",
+                      "if (pm.response.code < 300 && cuerpo.id) pm.collectionVariables.set('lote_id', cuerpo.id);"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Distribuciones",
+          "item": [
+            {
+              "name": "Crear · POST /distribuciones",
+              "request": {
+                "method": "POST",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{token_asesor}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/v1/distribuciones",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "distribuciones"
+                  ]
+                },
+                "description": "`POST /v1/distribuciones`\n\nRoles: ASESOR_BANCO. Usa `{{token_asesor}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nCuerpo: `CrearDistribucionDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"tipo_destino_id\": {{destino_comedor}},\n  \"nombre_destino\": \"Comedor comunitario La Esperanza\",\n  \"lineas\": [\n    {\n      \"tipo_alimento_id\": {{tipo_arroz}},\n      \"unidad_medida_id\": {{unidad_kg}},\n      \"cantidad\": 10\n    }\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const cuerpo = pm.response.json();",
+                      "if (pm.response.code < 300 && cuerpo.id) pm.collectionVariables.set('distribucion_id', cuerpo.id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Listar · GET /distribuciones",
+              "request": {
+                "method": "GET",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{token_asesor}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/distribuciones",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "distribuciones"
+                  ],
+                  "query": [
+                    {
+                      "key": "limite",
+                      "value": "20",
+                      "description": "",
+                      "disabled": true
+                    },
+                    {
+                      "key": "desplazamiento",
+                      "value": "0",
+                      "description": "",
+                      "disabled": true
+                    },
+                    {
+                      "key": "estado",
+                      "value": "",
+                      "description": "Valores: BORRADOR, CONFIRMADA, ANULADA",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "`GET /v1/distribuciones`\n\nRoles: ASESOR_BANCO, ADMIN. Usa `{{token_asesor}}`; cámbialo por el de otro rol permitido si lo necesitas."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const cuerpo = pm.response.json();",
+                      "const lista = Array.isArray(cuerpo) ? cuerpo : cuerpo.datos;",
+                      "if (lista?.[0]?.id && !pm.collectionVariables.get('distribucion_id')) pm.collectionVariables.set('distribucion_id', lista[0].id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Detalle · GET /distribuciones/{id}",
+              "request": {
+                "method": "GET",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{token_asesor}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/distribuciones/:id",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "distribuciones",
+                    ":id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{distribucion_id}}"
+                    }
+                  ]
+                },
+                "description": "`GET /v1/distribuciones/{id}`\n\nRoles: ASESOR_BANCO, ADMIN. Usa `{{token_asesor}}`; cámbialo por el de otro rol permitido si lo necesitas."
+              }
+            },
+            {
+              "name": "Confirmar · POST /distribuciones/{id}/confirmar",
+              "request": {
+                "method": "POST",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{token_asesor}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/distribuciones/:id/confirmar",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "distribuciones",
+                    ":id",
+                    "confirmar"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{distribucion_id}}"
+                    }
+                  ]
+                },
+                "description": "`POST /v1/distribuciones/{id}/confirmar`\n\nRoles: ASESOR_BANCO. Usa `{{token_asesor}}`; cámbialo por el de otro rol permitido si lo necesitas."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const cuerpo = pm.response.json();",
+                      "if (pm.response.code < 300 && cuerpo.id) pm.collectionVariables.set('distribucion_id', cuerpo.id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Anular · POST /distribuciones/{id}/anular",
+              "request": {
+                "method": "POST",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{token_asesor}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/distribuciones/:id/anular",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "distribuciones",
+                    ":id",
+                    "anular"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{distribucion_id}}"
+                    }
+                  ]
+                },
+                "description": "`POST /v1/distribuciones/{id}/anular`\n\nRoles: ASESOR_BANCO. Usa `{{token_asesor}}`; cámbialo por el de otro rol permitido si lo necesitas."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const cuerpo = pm.response.json();",
+                      "if (pm.response.code < 300 && cuerpo.id) pm.collectionVariables.set('distribucion_id', cuerpo.id);"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Alertas",
+          "item": [
+            {
+              "name": "Listar · GET /alertas",
+              "request": {
+                "method": "GET",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{token_asesor}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/alertas",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "alertas"
+                  ],
+                  "query": [
+                    {
+                      "key": "solo_abiertas",
+                      "value": "true",
+                      "description": "",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "`GET /v1/alertas`\n\nRoles: ASESOR_BANCO, ADMIN. Usa `{{token_asesor}}`; cámbialo por el de otro rol permitido si lo necesitas."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const cuerpo = pm.response.json();",
+                      "const lista = Array.isArray(cuerpo) ? cuerpo : cuerpo.datos;",
+                      "if (lista?.[0]?.id && !pm.collectionVariables.get('alerta_id')) pm.collectionVariables.set('alerta_id', lista[0].id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Atender · POST /alertas/{id}/atender",
+              "request": {
+                "method": "POST",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{token_asesor}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/v1/alertas/:id/atender",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "alertas",
+                    ":id",
+                    "atender"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{alerta_id}}"
+                    }
+                  ]
+                },
+                "description": "`POST /v1/alertas/{id}/atender`\n\nRoles: ASESOR_BANCO. Usa `{{token_asesor}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nCuerpo: `AtenderAlertaDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"accion_tomada\": \"Se priorizó en la siguiente distribución\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const cuerpo = pm.response.json();",
+                      "if (pm.response.code < 300 && cuerpo.id) pm.collectionVariables.set('alerta_id', cuerpo.id);"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Indicadores",
+      "item": [
+        {
+          "name": "Resumen · GET /kpis/resumen",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_asesor}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/kpis/resumen",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "kpis",
+                "resumen"
+              ],
+              "query": [
+                {
+                  "key": "desde",
+                  "value": "",
+                  "description": "Por defecto, hace 30 días",
+                  "disabled": true
+                },
+                {
+                  "key": "hasta",
+                  "value": "",
+                  "description": "Por defecto, ahora",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "`GET /v1/kpis/resumen`\n\nRoles: ASESOR_BANCO, ADMIN. Usa `{{token_asesor}}`; cámbialo por el de otro rol permitido si lo necesitas."
+          }
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Local: firma aquí los tokens de cada rol (HS256, igual que Supabase) con la",
+          "// clave del environment de `npm run datos:prueba`; el environment no guarda JWT.",
+          "// Proyecto real: pega tu access_token de Supabase en la variable token_sesion.",
+          "const clave = pm.environment.get('clave_jwt_local');",
+          "const roles = ['admin', 'asesor', 'donante', 'voluntario', 'solicitante'];",
+          "if (clave) {",
+          "  const b64url = (palabras) => CryptoJS.enc.Base64.stringify(palabras).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+          "  const json = (obj) => b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(obj)));",
+          "  const ahora = Math.floor(Date.now() / 1000);",
+          "  const firmar = (sub) => {",
+          "    const cuerpo = json({ alg: 'HS256', typ: 'JWT' }) + '.' + json({",
+          "      sub, role: 'authenticated', aud: 'authenticated',",
+          "      iss: pm.environment.get('emisor_jwt_local'), iat: ahora, exp: ahora + 3600,",
+          "    });",
+          "    return cuerpo + '.' + b64url(CryptoJS.HmacSHA256(cuerpo, clave));",
+          "  };",
+          "  for (const rol of roles) {",
+          "    const id = pm.environment.get('id_' + rol);",
+          "    if (id) pm.variables.set('token_' + rol, firmar(id));",
+          "  }",
+          "} else if (pm.collectionVariables.get('token_sesion')) {",
+          "  for (const rol of roles) pm.variables.set('token_' + rol, pm.collectionVariables.get('token_sesion'));",
+          "}",
+          "",
+          "// Fechas relativas al momento de ejecutar (ventana de recogida y vencimientos).",
+          "const minutos = (m) => new Date(Date.now() + m * 60000).toISOString();",
+          "const fechaBogota = (dias) => new Date(Date.now() - 5 * 3600000 + dias * 86400000).toISOString().slice(0, 10);",
+          "pm.variables.set('ventana_inicio', minutos(5));",
+          "pm.variables.set('ventana_fin', minutos(245));",
+          "pm.variables.set('fecha_en_90_dias', fechaBogota(90));"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.test('sin error del servidor', () => pm.expect(pm.response.code).to.be.below(500));"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "supabase_url",
+      "value": "https://mlfesivdmpopsmqfvikq.supabase.co"
+    },
+    {
+      "key": "supabase_anon_key",
+      "value": ""
+    },
+    {
+      "key": "token_sesion",
+      "value": ""
+    },
+    {
+      "key": "refresh_token",
+      "value": ""
+    },
+    {
+      "key": "usuario_id",
+      "value": ""
+    },
+    {
+      "key": "verificacion_id",
+      "value": ""
+    },
+    {
+      "key": "tipo_alimento_id",
+      "value": ""
+    },
+    {
+      "key": "dispositivo_id",
+      "value": ""
+    },
+    {
+      "key": "notificacion_id",
+      "value": ""
+    },
+    {
+      "key": "donacion_id",
+      "value": ""
+    },
+    {
+      "key": "oferta_id",
+      "value": ""
+    },
+    {
+      "key": "ruta_id",
+      "value": ""
+    },
+    {
+      "key": "parada_id",
+      "value": ""
+    },
+    {
+      "key": "incidencia_id",
+      "value": ""
+    },
+    {
+      "key": "sede_id",
+      "value": ""
+    },
+    {
+      "key": "recepcion_id",
+      "value": ""
+    },
+    {
+      "key": "lote_id",
+      "value": ""
+    },
+    {
+      "key": "distribucion_id",
+      "value": ""
+    },
+    {
+      "key": "alerta_id",
+      "value": ""
+    },
+    {
+      "key": "donacion_item_id",
+      "value": ""
+    },
+    {
+      "key": "ruta_archivo",
+      "value": ""
+    },
+    {
+      "key": "url_subida",
+      "value": ""
+    }
+  ]
+}

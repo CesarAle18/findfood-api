@@ -1,8 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '../../generated/prisma/client';
-import { type Tx } from '../../comun/prisma/prisma.service';
+import { PrismaService, type Tx } from '../../comun/prisma/prisma.service';
 import { generarCodigo } from '../../comun/codigos';
-import { distanciaKm, minutosEstimados } from '../../comun/geo';
+import { type Coordenada, distanciaKm, minutosEstimados } from '../../comun/geo';
+import { GoogleRoutesService } from '../../comun/google/google-routes.service';
 import { ParametrosService } from '../parametros/parametros.service';
 import { planificarRutaDinamica, type RecogidaDinamica } from '../ruteo/planificador-dinamico';
 import { TrazabilidadService } from '../../comun/trazabilidad/trazabilidad.service';
@@ -10,7 +11,7 @@ import { TrazabilidadService } from '../../comun/trazabilidad/trazabilidad.servi
 interface P { id: string; donacion_id: string|null; orden: number; estado: 'PENDIENTE'|'EN_SITIO'|'COMPLETADA'|'FALLIDA'|'OMITIDA'; tipo: 'RECOGIDA'|'ENTREGA'; lat:number; lng:number; peso_estimado_kg:number|null; peso_confirmado_kg:number|null; ventana_recogida_inicio:Date|null; ventana_recogida_fin:Date|null; }
 interface D { id:string; almacen_destino_id:string|null; estado:string; peso_estimado_kg:number; ventana_recogida_inicio:Date; ventana_recogida_fin:Date; direccion_recogida:string; lat:number; lng:number; }
 interface R { id:string; almacen_destino_id:string; estado:string; }
-type Resultado = {viable:true;rutaId:string}|{viable:false;codigo:string;motivo:string};
+type Resultado = {viable:true;rutaId:string;origen:Coordenada}|{viable:false;codigo:string;motivo:string};
 const no = (codigo:string,motivo:string):Resultado => ({viable:false,codigo,motivo});
 const coords = (
   p: { lat: number | null; lng: number | null },
@@ -31,10 +32,49 @@ const coords = (
 };
 const minutos = (a:{lat:number;lng:number},b:{lat:number;lng:number}) => minutosEstimados(distanciaKm(coords(a),coords(b)));
 
-/** Integración inicial con distancias estimadas: sin llamadas de red dentro de la transacción. */
+/**
+ * Integración inicial con distancias estimadas: sin llamadas de red dentro de la transacción.
+ * El trazado por calles (Google) se calcula después, con trazar().
+ */
 @Injectable()
 export class RutasDinamicasService {
-  constructor(private readonly parametros:ParametrosService,private readonly trazabilidad:TrazabilidadService) {}
+  private readonly logger = new Logger(RutasDinamicasService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly google: GoogleRoutesService,
+    private readonly parametros: ParametrosService,
+    private readonly trazabilidad: TrazabilidadService,
+  ) {}
+
+  /**
+   * Trazado por calles del tramo pendiente: desde `origen` (la posición con la que se planificó)
+   * por las paradas pendientes en el orden ya decidido, hasta la sede. Corre fuera de la
+   * transacción y nunca cambia el orden. Si Google no responde, la ruta queda sin trazado y
+   * el panel une las paradas en línea recta. Si otra aceptación reordenó las paradas mientras
+   * Google respondía, no escribe: ese recálculo es el vigente.
+   */
+  async trazar(rutaId: string, origen: Coordenada): Promise<void> {
+    if (!this.google.disponible) return;
+    const paradas = await this.prisma.$queryRaw<(Coordenada & { id: string })[]>`
+      SELECT id, ST_Y(ubicacion::geometry) AS lat, ST_X(ubicacion::geometry) AS lng
+        FROM parada_ruta
+       WHERE ruta_id = ${rutaId}::uuid AND estado IN ('PENDIENTE','EN_SITIO')
+       ORDER BY orden`;
+    if (!paradas.length) return;
+    const trazado = await this.google.ruta([origen, ...paradas]);
+    if (!trazado) return;
+    const firma = paradas.map((p) => p.id).join(',');
+    const escritas = await this.prisma.$executeRaw`
+      UPDATE ruta
+         SET geometria = ST_SetSRID(ST_LineFromEncodedPolyline(${trazado.polilinea}), 4326),
+             distancia_total_km = ${Math.round(trazado.distanciaKm * 100) / 100}::numeric,
+             proveedor_ruteo = 'GOOGLE'
+       WHERE id = ${rutaId}::uuid AND estado IN ('PLANIFICADA','EN_CURSO')
+         AND (SELECT string_agg(id::text, ',' ORDER BY orden) FROM parada_ruta
+               WHERE ruta_id = ${rutaId}::uuid AND estado IN ('PENDIENTE','EN_SITIO')) = ${firma}`;
+    if (!escritas) this.logger.log({ rutaId }, 'Trazado descartado: la ruta cambió mientras Google respondía');
+  }
 
   async incorporar(tx:Tx, args:{voluntarioId:string;usuarioId:string;donacionId:string;asignacionId:string;capacidadKg:number}):Promise<Resultado> {
     const [d] = await tx.$queryRaw<D[]>`
@@ -160,11 +200,13 @@ export class RutasDinamicasService {
       FROM almacen a WHERE a.id=${destino.id}::uuid`;
     const kg = recogidas.reduce((acc,p)=> acc+ (p.estado==='FALLIDA'||p.estado==='OMITIDA'?0:
       Number(p.estado==='COMPLETADA'?(p.peso_confirmado_kg??p.peso_estimado_kg):p.peso_estimado_kg)),Number(d.peso_estimado_kg));
+    // El trazado anterior ya no sigue el nuevo orden: trazar() lo recalcula tras la transacción.
     await tx.$executeRaw`UPDATE ruta SET duracion_estimada_min=${Math.round(plan.duracionEstimadaMin)},
-      peso_total_estimado_kg=${kg},proveedor_ruteo=NULL WHERE id=${rutaId}::uuid`;
+      peso_total_estimado_kg=${kg},proveedor_ruteo=NULL,geometria=NULL,distancia_total_km=NULL
+      WHERE id=${rutaId}::uuid`;
     await this.trazabilidad.registrar(tx,{ambito:'RUTA',entidad:{rutaId},
       anterior:ruta?.estado??undefined,nuevo:'EN_CURSO',usuarioId:args.usuarioId,
       metadata:{incorporacion_donacion_id:d.id,reoptimizadas:finalIds}});
-    return {viable:true,rutaId};
+    return {viable:true,rutaId,origen:coords(v)};
   }
 }

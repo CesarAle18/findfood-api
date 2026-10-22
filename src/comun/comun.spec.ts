@@ -2,7 +2,7 @@ import { Prisma } from '../generated/prisma/client';
 import { generarPasswordTemporal } from '../modulos/admin/usuarios-admin.service';
 import { renderizarPlantilla } from '../modulos/notificaciones/plantilla';
 import { generarCodigo } from './codigos';
-import { distanciaKm } from './geo';
+import { decodificarPolilinea, distanciaKm } from './geo';
 import { codigoPostgres, violaUnicidad } from './http/errores-pg';
 import { aJson } from './http/serializacion.interceptor';
 import { fechaBogota } from './tiempo';
@@ -112,5 +112,19 @@ describe('serialización', () => {
       id: 7,
       lista: [1],
     });
+  });
+});
+
+describe('polilínea codificada de Google', () => {
+  it('decodifica el ejemplo de la documentación', () => {
+    expect(decodificarPolilinea('_p~iF~ps|U_ulLnnqC_mqNvxq`@')).toEqual([
+      { lat: 38.5, lng: -120.2 },
+      { lat: 40.7, lng: -120.95 },
+      { lat: 43.252, lng: -126.453 },
+    ]);
+  });
+
+  it('una cadena vacía no tiene puntos', () => {
+    expect(decodificarPolilinea('')).toEqual([]);
   });
 });

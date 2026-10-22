@@ -21,7 +21,10 @@ En local no hay GoTrue. Para crear cuentas, inserta en `auth.users` como `postgr
 
 ## Pruebas manuales con Postman
 
-La colección [`postman/FindFood.postman_collection.json`](postman/FindFood.postman_collection.json) tiene 90 peticiones. Las carpetas 0 a 9 recorren el flujo completo, desde la creación de la donación hasta la recepción, la distribución y la suspensión. Cada petición guarda los ids que necesita la siguiente. La carpeta de alternativas cubre las ramas y los errores.
+Hay dos colecciones:
+
+- [`postman/FindFood-endpoints.postman_collection.json`](postman/FindFood-endpoints.postman_collection.json): **todos los endpoints** de la API, agrupados por módulo, con el token del rol que corresponde y un cuerpo de ejemplo válido. Se genera desde el código con `npm run postman:generar` (compila y lee las rutas, los DTO y los `@Roles()`), así que no se edita a mano: se regenera cuando cambia un controlador o un DTO.
+- [`postman/FindFood.postman_collection.json`](postman/FindFood.postman_collection.json): 92 peticiones escritas a mano. Las carpetas 0 a 9 recorren el flujo completo, desde la creación de la donación hasta la recepción, la distribución y la suspensión. Cada petición guarda los ids que necesita la siguiente. La carpeta de alternativas cubre las ramas y los errores, y la de sesión habla directo con Supabase Auth.
 
 ```bash
 npm run db:local        # base local (la real aún tiene el esquema v2)
@@ -99,6 +102,7 @@ En Postman, importa la colección y `postman/FindFood-local.postman_environment.
 | `GET /v1/distribuciones[/{id}]` · `POST …/{id}/anular` | Consulta y anulación de distribuciones |
 | `GET /v1/kpis/resumen` | Indicadores del periodo |
 | `GET/PUT /v1/admin/banco` · `POST/PATCH /v1/admin/tipos-alimento` | Configuración del único banco y del catálogo |
+| `GET /v1/panel/sesion` · `POST /v1/panel/recuperar-contrasena` | Acceso al panel web solo para ADMIN y ASESOR_BANCO, y código de recuperación solo para ese personal con la cuenta ACTIVA (decisión 16) |
 | `POST/GET /v1/admin/usuarios` · `GET /v1/admin/verificaciones/{id}` · `GET /v1/admin/tareas` | Gestión de cuentas, documentos (URL de 60 s) y salud del reloj (§16) |
 
 ## Decisiones de implementación para revisar con el equipo
@@ -136,3 +140,8 @@ En Postman, importa la colección y `postman/FindFood-local.postman_environment.
     - **Recepción:** el lote toma siempre el vencimiento declarado en el producto (ya no se corrige al recibir).
     - **Parámetros:** el API solo lista y edita los cuatro `PESO_*` y `MAX_PARADAS_POR_RUTA` (1 a 5). Los demás se fijan en la base.
     - **Usuarios internos:** `POST /v1/admin/asesores` pasó a `POST /v1/admin/usuarios` con `rol` (`ADMIN` o `ASESOR_BANCO`), como el formulario del panel.
+16. **Acceso al panel web.** El login sigue siendo directo contra Supabase Auth (la API nunca ve contraseñas, §4), así que la regla se aplica en dos endpoints:
+    - `GET /v1/panel/sesion`: el panel la llama justo después del login. Si la cuenta no es ADMIN ni ASESOR_BANCO responde 403 `acceso-panel-denegado` y el panel cierra la sesión y muestra el mensaje. Aunque se saltara esa llamada, el RolesGuard ya rechaza a ese rol en todos los endpoints del panel.
+    - `POST /v1/panel/recuperar-contrasena`: pide a Supabase el correo de recuperación solo para personal ACTIVO. Responde siempre 202 con el mismo mensaje, para no revelar qué correos existen ni su rol.
+    - El correo es la plantilla **Reset Password** de Supabase: para que lleve un código debe mostrar `{{ .Token }}` (Authentication → Email Templates). El panel canjea el código con `verifyOtp({ email, token, type: 'recovery' })` y cambia la contraseña con `updateUser({ password })`.
+    - `POST /auth/v1/recover` de Supabase sigue abierto porque lo usa la app móvil. Quien lo llame directo con un correo de donante recibe el correo normal de la app, no acceso al panel.

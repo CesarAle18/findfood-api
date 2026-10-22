@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigApp } from '../../config/configuracion';
 import type { Coordenada } from '../geo';
+import { errorGoogle } from './error-google';
 
 export interface Tramo {
   duracionMin: number;
@@ -18,10 +19,14 @@ const URL_MATRIZ =
   'https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix';
 const URL_RUTAS = 'https://routes.googleapis.com/directions/v2:computeRoutes';
 
+/** Waypoint de Compute Routes (origin, destination, intermediates). */
 function waypoint(c: Coordenada) {
-  return {
-    waypoint: { location: { latLng: { latitude: c.lat, longitude: c.lng } } },
-  };
+  return { location: { latLng: { latitude: c.lat, longitude: c.lng } } };
+}
+
+/** Route Matrix envuelve el waypoint: RouteMatrixOrigin / RouteMatrixDestination. */
+function extremoMatriz(c: Coordenada) {
+  return { waypoint: waypoint(c) };
 }
 
 function segundos(duracion: string | undefined): number {
@@ -64,15 +69,15 @@ export class GoogleRoutesService {
             'originIndex,destinationIndex,duration,distanceMeters,condition',
         },
         body: JSON.stringify({
-          origins: origenes.map(waypoint),
-          destinations: destinos.map(waypoint),
+          origins: origenes.map(extremoMatriz),
+          destinations: destinos.map(extremoMatriz),
           travelMode: 'DRIVE',
           routingPreference: 'TRAFFIC_AWARE',
         }),
       });
       if (!respuesta.ok) {
         this.logger.warn(
-          { status: respuesta.status },
+          await errorGoogle(respuesta),
           'Route Matrix falló; fallback geodésico',
         );
         return null;
@@ -139,7 +144,7 @@ export class GoogleRoutesService {
         }),
       });
       if (!respuesta.ok) {
-        this.logger.warn({ status: respuesta.status }, 'Compute Routes falló');
+        this.logger.warn(await errorGoogle(respuesta), 'Compute Routes falló');
         return null;
       }
       const { routes } = (await respuesta.json()) as {

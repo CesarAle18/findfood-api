@@ -24,7 +24,8 @@
     "db:pull": "prisma db pull && prisma generate",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start:local": "ENV_FILE=.env.local nest start --watch",
-    "datos:prueba": "node scripts/datos-prueba.mjs"
+    "datos:prueba": "node scripts/datos-prueba.mjs",
+    "postman:generar": "nest build && node scripts/generar-postman.mjs"
   },
   "dependencies": {
     "@nestjs/common": "^12.0.1",

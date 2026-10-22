@@ -8,6 +8,8 @@ import {
   IsIn,
   IsInt,
   IsISO8601,
+  IsLatitude,
+  IsLongitude,
   IsNumber,
   IsOptional,
   IsString,
@@ -16,6 +18,7 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { CoordenadaDto } from '../../comun/geo';
@@ -141,4 +144,19 @@ export class ParadaFallidaDto {
   @ValidateNested()
   @Type(() => CoordenadaDto)
   ubicacion?: CoordenadaDto;
+}
+
+/** Posición actual del voluntario, si quien consulta la tiene (p. ej. el panel por Realtime). */
+export class SeguimientoDto {
+  @ApiPropertyOptional({ example: 4.6533 })
+  @ValidateIf((o: SeguimientoDto) => o.lat !== undefined || o.lng !== undefined)
+  @Type(() => Number)
+  @IsLatitude()
+  lat?: number;
+
+  @ApiPropertyOptional({ example: -74.0836 })
+  @ValidateIf((o: SeguimientoDto) => o.lat !== undefined || o.lng !== undefined)
+  @Type(() => Number)
+  @IsLongitude()
+  lng?: number;
 }

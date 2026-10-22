@@ -7,6 +7,17 @@ import { Client } from 'pg';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 import { AppModule } from '../../src/app.module';
+import type { Coordenada } from '../../src/comun/geo';
+import {
+  GoogleRoutesService,
+  type RutaCalculada,
+} from '../../src/comun/google/google-routes.service';
+import {
+  type Geocodificacion,
+  GoogleLugaresService,
+  type Lugar,
+  type Sugerencia,
+} from '../../src/comun/google/google-lugares.service';
 import {
   ErrorSupabase,
   SupabaseService,
@@ -25,6 +36,8 @@ import { BASE_PRUEBAS, urlBase } from '../configuracion/base-de-pruebas';
  */
 export class SupabaseFalso {
   sesionesBloqueadas = new Set<string>();
+  /** Correos a los que se pidió enviar el código de recuperación. */
+  recuperaciones: string[] = [];
 
   constructor(private readonly sql: Client) {}
 
@@ -46,6 +59,10 @@ export class SupabaseFalso {
       [d.email, `hash:${d.password}`, d.appMetadata, d.userMetadata],
     );
     return rows[0].id;
+  }
+
+  async enviarCodigoRecuperacion(email: string): Promise<void> {
+    this.recuperaciones.push(email);
   }
 
   async eliminarUsuario(id: string): Promise<void> {
@@ -94,6 +111,57 @@ export class PushFalso extends ProveedorPush {
   }
 }
 
+/**
+ * Places/Geocoding simulado. Arranca no disponible, como sin GOOGLE_MAPS_API_KEY
+ * (entorno.ts): la suite que lo necesita lo enciende y registra respuestas.
+ */
+export class LugaresFalso {
+  disponible = false;
+  sugerencias: Sugerencia[] | null = [];
+  lugar: Lugar | null = null;
+  geocodificacion: Geocodificacion | null | undefined = undefined;
+  llamadas: { metodo: string; args: unknown[] }[] = [];
+
+  async autocompletar(texto: string, sesion: string, cerca: Coordenada) {
+    this.llamadas.push({ metodo: 'autocompletar', args: [texto, sesion, cerca] });
+    return this.disponible ? this.sugerencias : null;
+  }
+
+  async detalle(placeId: string, sesion: string) {
+    this.llamadas.push({ metodo: 'detalle', args: [placeId, sesion] });
+    return this.disponible ? this.lugar : null;
+  }
+
+  async geocodificar(direccion: string) {
+    this.llamadas.push({ metodo: 'geocodificar', args: [direccion] });
+    return this.disponible ? this.geocodificacion : null;
+  }
+
+  async geocodificarInversa(c: Coordenada) {
+    this.llamadas.push({ metodo: 'geocodificarInversa', args: [c] });
+    return this.disponible ? this.geocodificacion : null;
+  }
+}
+
+/**
+ * Routes simulado. Por omisión equivale a no tener GOOGLE_MAPS_API_KEY (entorno.ts): la
+ * matriz y las rutas devuelven null y el código usa la distancia geodésica.
+ */
+export class RutasGoogleFalso {
+  disponible = false;
+  respuestaRuta: RutaCalculada | null = null;
+  rutas: Coordenada[][] = [];
+
+  async matriz() {
+    return null;
+  }
+
+  async ruta(puntos: Coordenada[]) {
+    this.rutas.push(puntos);
+    return this.disponible ? this.respuestaRuta : null;
+  }
+}
+
 export interface Cuenta {
   id: string;
   email: string;
@@ -116,6 +184,8 @@ export class ContextoPruebas {
   sql: Client;
   supabase: SupabaseFalso;
   push = new PushFalso();
+  lugares = new LugaresFalso();
+  rutasGoogle = new RutasGoogleFalso();
 
   static async crear(): Promise<ContextoPruebas> {
     const ctx = new ContextoPruebas();
@@ -127,6 +197,10 @@ export class ContextoPruebas {
       .useValue(ctx.supabase)
       .overrideProvider(ProveedorPush)
       .useValue(ctx.push)
+      .overrideProvider(GoogleLugaresService)
+      .useValue(ctx.lugares)
+      .overrideProvider(GoogleRoutesService)
+      .useValue(ctx.rutasGoogle)
       .compile();
     const app = modulo.createNestApplication<NestExpressApplication>({
       logger: false,

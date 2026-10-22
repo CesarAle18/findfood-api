@@ -9,6 +9,7 @@ import { DonacionesService } from '../donaciones/donaciones.service';
 import { LotesService } from '../inventario/lotes.service';
 import { EnvioNotificacionesService } from '../notificaciones/envio.service';
 import { ParametrosService } from '../parametros/parametros.service';
+import { RuteoService } from '../ruteo/ruteo.service';
 
 export interface EstadoTarea {
   ultimaEjecucion?: Date;
@@ -39,6 +40,7 @@ export class TareasService {
     private readonly envio: EnvioNotificacionesService,
     private readonly lotes: LotesService,
     private readonly usuarios: UsuariosAdminService,
+    private readonly ruteo: RuteoService,
   ) {}
 
   async ejecutar(
@@ -88,6 +90,14 @@ export class TareasService {
   enviarNotificaciones() {
     return this.ejecutar('enviar_notificaciones', () =>
       this.envio.procesarPendientes(),
+    );
+  }
+
+  /** Regla RUTA_MAX_ACTIVA_HORAS: rutas activas por más de 24 h se cancelan. */
+  @Cron(CronExpression.EVERY_10_MINUTES, { name: 'cancelar_rutas_vencidas' })
+  cancelarRutasVencidas() {
+    return this.ejecutar('cancelar_rutas_vencidas', () =>
+      this.ruteo.cancelarRutasVencidas(),
     );
   }
 

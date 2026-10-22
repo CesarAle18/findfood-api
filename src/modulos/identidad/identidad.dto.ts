@@ -3,6 +3,7 @@ import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsBoolean,
+  IsEmail,
   IsIn,
   IsInt,
   IsISO8601,
@@ -180,3 +181,13 @@ export class EstadoVoluntarioDto {
 }
 
 export class UbicacionVoluntarioDto extends CoordenadaDto {}
+
+export class RecuperarContrasenaDto {
+  @ApiProperty()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim().toLowerCase() : value,
+  )
+  @IsEmail()
+  @MaxLength(255)
+  email: string;
+}

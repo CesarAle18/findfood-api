@@ -45,3 +45,31 @@ export const VELOCIDAD_URBANA_KMH = 20;
 export function minutosEstimados(km: number): number {
   return (km / VELOCIDAD_URBANA_KMH) * 60;
 }
+
+/**
+ * Decodifica una polilínea codificada de Google (precisión 1e-5) a puntos
+ * {lat, lng}. https://developers.google.com/maps/documentation/utilities/polylinealgorithm
+ */
+export function decodificarPolilinea(codificada: string): Coordenada[] {
+  const puntos: Coordenada[] = [];
+  let i = 0;
+  let lat = 0;
+  let lng = 0;
+  const siguiente = () => {
+    let resultado = 0;
+    let desplazamiento = 0;
+    let byte: number;
+    do {
+      byte = codificada.charCodeAt(i++) - 63;
+      resultado |= (byte & 0x1f) << desplazamiento;
+      desplazamiento += 5;
+    } while (byte >= 0x20 && i < codificada.length);
+    return resultado & 1 ? ~(resultado >> 1) : resultado >> 1;
+  };
+  while (i < codificada.length) {
+    lat += siguiente();
+    lng += siguiente();
+    puntos.push({ lat: lat / 1e5, lng: lng / 1e5 });
+  }
+  return puntos;
+}

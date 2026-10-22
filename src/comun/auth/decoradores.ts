@@ -15,11 +15,11 @@ export const CLAVE_ROLES = 'auth:roles';
 /** Ruta sin autenticación (p. ej. /health). */
 export const Publica = () => SetMetadata(CLAVE_PUBLICA, true);
 
-/** Admite cuentas en PENDIENTE_CONFIRMACION (solo GET/PATCH /v1/me). */
+/** Admite cuentas en PENDIENTE_CONFIRMACION (GET/PATCH /v1/me y GET /v1/panel/sesion). */
 export const PermitirPendiente = () =>
   SetMetadata(CLAVE_PERMITIR_PENDIENTE, true);
 
-/** Admite cuentas con contraseña temporal sin cambiar (solo GET /v1/me). */
+/** Admite cuentas con contraseña temporal sin cambiar (GET /v1/me y GET /v1/panel/sesion). */
 export const PermitirPasswordTemporal = () =>
   SetMetadata(CLAVE_PERMITIR_PASSWORD_TEMPORAL, true);
 
