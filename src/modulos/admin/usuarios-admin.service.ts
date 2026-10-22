@@ -3,6 +3,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { Request } from 'express';
 import type { UsuarioAutenticado } from '../../comun/auth/tipos';
 import { CorreoService } from '../../comun/correo/correo.service';
+import { ESLOGAN, htmlCorreo } from '../../comun/correo/plantilla';
 import {
   conflicto,
   noEncontrado,
@@ -53,6 +54,51 @@ export function generarPasswordTemporal(): string {
   return caracteres.join('');
 }
 
+/** Correo de bienvenida con la contraseña temporal de una cuenta interna. */
+export function correoCuentaInterna(
+  dto: Pick<CrearUsuarioInternoDto, 'email' | 'nombres' | 'rol'>,
+  password: string,
+) {
+  const asunto = 'Tu cuenta de FindFood';
+  const saludo = `Hola ${dto.nombres},`;
+  const alta = `Se creó tu cuenta de ${NOMBRE_ROL[dto.rol]} en FindFood. Estos son tus datos para ingresar al panel:`;
+  const cambio =
+    'Por seguridad, deberás cambiar esta contraseña la primera vez que ingreses.';
+  const aviso =
+    'Esta contraseña es temporal. Si no esperabas este correo, comunícate con el administrador del banco de alimentos.';
+
+  const texto = [
+    saludo,
+    '',
+    alta,
+    `Usuario: ${dto.email}`,
+    `Contraseña temporal: ${password}`,
+    '',
+    cambio,
+    '',
+    aviso,
+    '',
+    `FindFood. ${ESLOGAN}`,
+  ].join('\n');
+
+  const html = htmlCorreo('Te damos la bienvenida a FindFood', [
+    { tipo: 'parrafo', texto: saludo },
+    { tipo: 'parrafo', texto: alta },
+    {
+      tipo: 'recuadro',
+      etiqueta: 'Tus datos de acceso',
+      filas: [
+        { nombre: 'Usuario', valor: dto.email },
+        { nombre: 'Contraseña temporal', valor: password, codigo: true },
+      ],
+    },
+    { tipo: 'parrafo', texto: cambio },
+    { tipo: 'parrafo', texto: aviso, tenue: true },
+  ]);
+
+  return { asunto, texto, html };
+}
+
 @Injectable()
 export class UsuariosAdminService {
   private readonly logger = new Logger(UsuariosAdminService.name);
@@ -67,7 +113,7 @@ export class UsuariosAdminService {
   /**
    * Alta de una cuenta interna, ADMIN o ASESOR_BANCO (§11): la cuenta se crea
    * con la API de administración y el rol llega por app_metadata (el disparador
-   * §16 lo aplica). La contraseña temporal se envía por correo; sin SMTP
+   * §16 lo aplica). La contraseña temporal se envía por correo; sin Brevo
    * configurado se devuelve una sola vez al administrador.
    */
   async crearUsuarioInterno(
@@ -121,18 +167,12 @@ export class UsuariosAdminService {
       });
     });
 
+    const correo = correoCuentaInterna(dto, password);
     const enviado = await this.correo.enviar(
       dto.email,
-      'Tu cuenta de FindFood',
-      [
-        `Hola ${dto.nombres},`,
-        '',
-        `Se creó tu cuenta de ${NOMBRE_ROL[dto.rol]} en FindFood.`,
-        `Usuario: ${dto.email}`,
-        `Contraseña temporal: ${password}`,
-        '',
-        'Deberás cambiarla en tu primer ingreso al panel.',
-      ].join('\n'),
+      correo.asunto,
+      correo.texto,
+      correo.html,
     );
     if (!enviado) {
       this.logger.warn(

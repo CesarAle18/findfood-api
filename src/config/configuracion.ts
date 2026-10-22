@@ -28,10 +28,13 @@ const esquema = z
     GOOGLE_MAPS_API_KEY: z.string().min(1).optional(),
     EXPO_ACCESS_TOKEN: z.string().min(1).optional(),
 
-    // Correo de la contraseña temporal de los asesores. Sin SMTP, la API la
-    // devuelve una sola vez al administrador que crea la cuenta.
-    SMTP_URL: z.string().startsWith('smtp').optional(),
-    SMTP_FROM: z.string().min(3).optional(),
+    // Correo de la contraseña temporal de los asesores, por la API HTTP de
+    // Brevo (Railway bloquea los puertos SMTP salientes fuera del plan Pro).
+    // Sin Brevo, la API devuelve la contraseña una sola vez al administrador
+    // que crea la cuenta.
+    BREVO_API_KEY: z.string().startsWith('xkeysib-').optional(),
+    BREVO_SENDER_EMAIL: z.email().optional(),
+    BREVO_SENDER_NAME: z.string().min(2).default('FindFood'),
 
     DOCS_HABILITADOS: booleano.optional(),
     TAREAS_HABILITADAS: booleano.default(true),
@@ -65,11 +68,11 @@ const esquema = z
         message: 'obligatoria en producción',
       });
     }
-    if (c.SMTP_URL && !c.SMTP_FROM) {
+    if (c.BREVO_API_KEY && !c.BREVO_SENDER_EMAIL) {
       ctx.addIssue({
         code: 'custom',
-        path: ['SMTP_FROM'],
-        message: 'obligatoria cuando se define SMTP_URL',
+        path: ['BREVO_SENDER_EMAIL'],
+        message: 'obligatoria cuando se define BREVO_API_KEY',
       });
     }
   });
