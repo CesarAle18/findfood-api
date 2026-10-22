@@ -1,7 +1,11 @@
 import { Prisma } from '../generated/prisma/client';
-import { generarPasswordTemporal } from '../modulos/admin/usuarios-admin.service';
+import {
+  correoCuentaInterna,
+  generarPasswordTemporal,
+} from '../modulos/admin/usuarios-admin.service';
 import { renderizarPlantilla } from '../modulos/notificaciones/plantilla';
 import { generarCodigo } from './codigos';
+import { ESLOGAN } from './correo/plantilla';
 import { distanciaKm } from './geo';
 import { codigoPostgres, violaUnicidad } from './http/errores-pg';
 import { aJson } from './http/serializacion.interceptor';
@@ -112,5 +116,28 @@ describe('serialización', () => {
       id: 7,
       lista: [1],
     });
+  });
+});
+
+describe('correo de cuenta interna', () => {
+  const dto = {
+    email: 'asesor@ejemplo.com',
+    nombres: '<b>Ana</b> & Co',
+    rol: 'ASESOR_BANCO' as const,
+  };
+
+  it('lleva usuario, contraseña y eslogan en texto y HTML', () => {
+    const correo = correoCuentaInterna(dto, 'Ab3$xyz-Q7k?mn');
+    for (const cuerpo of [correo.texto, correo.html]) {
+      expect(cuerpo).toContain('asesor@ejemplo.com');
+      expect(cuerpo).toContain('Ab3$xyz-Q7k?mn');
+      expect(cuerpo).toContain(ESLOGAN);
+    }
+  });
+
+  it('escapa los datos del usuario en el HTML', () => {
+    const { html } = correoCuentaInterna(dto, 'x');
+    expect(html).toContain('&lt;b&gt;Ana&lt;/b&gt; &amp; Co');
+    expect(html).not.toContain('<b>Ana</b>');
   });
 });

@@ -14,4 +14,4 @@ process.env.SUPABASE_SERVICE_ROLE_KEY = 'clave-de-servicio-de-pruebas';
 process.env.SUPABASE_JWT_SECRET = 'secreto-de-pruebas-findfood-e2e';
 process.env.TAREAS_HABILITADAS = 'false';
 delete process.env.GOOGLE_MAPS_API_KEY;
-delete process.env.SMTP_URL;
+delete process.env.BREVO_API_KEY;

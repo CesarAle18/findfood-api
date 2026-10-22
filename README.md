@@ -123,7 +123,7 @@ En Postman, importa la colección y `postman/FindFood-local.postman_environment.
    - El ranking se guarda y solo se recalcula con Google cuando aparecen voluntarios factibles nuevos, para contener el costo (§15.2).
 7. **Abandono sin margen.** Si la ventana ya no permite otra recogida, la donación pasa a EXPIRADA, se avisa al donante y se abre una incidencia `OTRO`.
 8. **Incidencias.** No cambian estados por sí solas. El personal actúa con cancelar o reasignar. La parada fallida se registra con `/paradas/{id}/fallida`.
-9. **Contraseña temporal.** Se envía por SMTP si `SMTP_URL` está definido. Si no, se devuelve **una sola vez** al ADMIN en la respuesta del alta (pregunta abierta §19.5).
+9. **Contraseña temporal.** Se envía por la API HTTP de Brevo si `BREVO_API_KEY` está definida. Si no, se devuelve **una sola vez** al ADMIN en la respuesta del alta (pregunta abierta §19.5).
 10. **Suspensión.** Es indefinida hasta que un ADMIN reactiva la cuenta. Las sesiones se cierran con `ban_duration` en Supabase Auth, y el AuthGuard bloquea desde la siguiente petición.
 11. **Push.** Expo Push, detrás de la interfaz `ProveedorPush`, para poder cambiar a FCM directo (§19.4).
 12. **Observabilidad.** Logs JSON con `nestjs-pino`, con id de petición y de usuario. **Sentry no está integrado:** `@sentry/nestjs` todavía no declara compatibilidad con NestJS 12.
