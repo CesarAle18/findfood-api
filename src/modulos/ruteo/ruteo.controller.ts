@@ -17,14 +17,19 @@ import {
   ListarRutasDto,
   LlegadaParadaDto,
   ParadaFallidaDto,
+  SeguimientoDto,
 } from './ruteo.dto';
 import { RuteoService } from './ruteo.service';
+import { SeguimientoService } from './seguimiento.service';
 
 @ApiTags('ruteo')
 @ApiBearerAuth()
 @Controller('rutas')
 export class RutasController {
-  constructor(private readonly ruteo: RuteoService) {}
+  constructor(
+    private readonly ruteo: RuteoService,
+    private readonly seguimientos: SeguimientoService,
+  ) {}
 
   @Post()
   @Roles('VOLUNTARIO', 'ASESOR_BANCO')
@@ -51,6 +56,17 @@ export class RutasController {
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     return this.ruteo.detalle(usuario, id);
+  }
+
+  /** Camino y llegada estimada a la siguiente parada de una ruta EN_CURSO. */
+  @Get(':id/seguimiento')
+  @Roles('VOLUNTARIO', 'ASESOR_BANCO', 'ADMIN')
+  seguimiento(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() dto: SeguimientoDto,
+  ) {
+    return this.seguimientos.seguimiento(usuario, id, dto);
   }
 
   @Post(':id/iniciar')

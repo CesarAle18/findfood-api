@@ -7,6 +7,7 @@ import { IncidenciasModule } from '../incidencias/incidencias.module';
 import { NotificacionesModule } from '../notificaciones/notificaciones.module';
 import { ParadasController, RutasController } from './ruteo.controller';
 import { RuteoService } from './ruteo.service';
+import { SeguimientoService } from './seguimiento.service';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { RuteoService } from './ruteo.service';
     NotificacionesModule,
   ],
   controllers: [RutasController, ParadasController],
-  providers: [RuteoService],
+  providers: [RuteoService, SeguimientoService],
+  exports: [RuteoService],
 })
 export class RuteoModule {}

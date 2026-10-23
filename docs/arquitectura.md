@@ -279,6 +279,24 @@ Si ningún radio produce candidatos, la donación queda PUBLICADA sin oferta viv
 - **Plazo de 2 s y *fallback*.** Si Google falla, tarda o se agota la cuota, el puntaje usa la distancia geodésica y una velocidad urbana de referencia. La asignación **nunca** se bloquea por un tercero.
 - Se usa `ubicacion_base` (declarada), no la posición en vivo. Esto coincide con la decisión del modelo v2 (§8.4.5) y es lo menos invasivo en privacidad.
 
+### 6.3.1 Búsqueda de direcciones (`/v1/geo`)
+
+La app y el panel buscan direcciones a través de la API (`GeoService` + `GoogleLugaresService`, Places API New y Geocoding), así la llave del servidor nunca sale de Railway.
+
+| Endpoint | Google | Respuesta |
+|---|---|---|
+| `GET /geo/autocompletar?q&sesion&lat?&lng?` | Places Autocomplete | `{ sugerencias: [{ place_id, principal, secundario }] }` |
+| `GET /geo/lugares/:placeId?sesion` | Place Details (cierra la sesión) | `{ place_id, direccion, ubicacion }` |
+| `GET /geo/geocodificar?direccion` | Geocoding | `{ direccion, ubicacion, precision }` o 404 |
+| `GET /geo/inversa?lat&lng` | Geocoding inverso | `{ direccion }` o 404 |
+
+- **No toca los filtros duros.** Los endpoints son de solo lectura. El punto que se guarda en `ubicacion_recogida`, `ubicacion_base` o `almacen.ubicacion` sigue llegando como `CoordenadaDto` por los endpoints de cada dominio, y es el pin que confirma el usuario.
+- **La calidad del punto sí los afecta.** Un centroide de barrio puede dejar el punto a kilómetros del sitio real y cambiar quién pasa el `ST_DWithin` de §6.2. Por eso `precision` (el `location_type` de Google) viaja al cliente, que pide ajustar el pin si es `GEOMETRIC_CENTER` o `APPROXIMATE`.
+- **Sesgo y región:** `includedRegionCodes: ['co']` / `components=country:CO`, con un sesgo de 50 km alrededor de `banco_alimentos.ubicacion`.
+- **Sin Google:** 503 `geo-no-disponible`. La app recurre al geocoder del teléfono y el panel a ubicar el pin a mano.
+- **Tope:** 60 consultas por usuario y minuto, en memoria (la API corre como un solo proceso), con 429 `demasiadas-solicitudes`.
+- `ultima_ubicacion` y las muestras del rastreo **no** se geocodifican (§9.2).
+
 ### 6.4 Puntaje: `s(v,d) = w₁·proximidad + w₂·urgencia + w₃·confiabilidad + w₄·holgura_carga`
 
 Los pesos son los parámetros `PESO_PROXIMIDAD`, `PESO_URGENCIA`, `PESO_CONFIABILIDAD` y `PESO_HOLGURA`. Los valores iniciales son 0,35 / 0,25 / 0,25 / 0,15, y la API rechaza una configuración cuya suma no sea 1.
@@ -367,6 +385,7 @@ El proceso de NestJS es persistente, así que el reloj vive **dentro de la aplic
 |---|---|---|
 | `vencer_ofertas` | 1 min | OFRECIDA con `expira_at ≤ now()` → EXPIRADA; ofrece la donación al siguiente candidato si la publicación sigue vigente, y reintenta el matching de las publicadas sin oferta viva |
 | `expirar_publicaciones` | 1 min | PUBLICADA con `expira_publicacion_at ≤ now()` → EXPIRADA, cierra su oferta viva y avisa al donante (`DONACION_EXPIRADA`) |
+| `cancelar_rutas_vencidas` | 10 min | Regla `RUTA_MAX_ACTIVA_HORAS` (24 h, constante en `ruteo.service.ts`): una ruta PLANIFICADA o EN_CURSO creada hace más de 24 h → CANCELADA, aunque lleve comida recogida. Sus recogidas sin hacer expiran (`DONACION_EXPIRADA` al donante, `DONACION_CANCELADA` al voluntario) y su asignación queda CANCELADA, que no cuenta como abandono. Lo ya recogido no cambia: el historial de la ruta lo lista en `recogidas_sin_entregar` para que el personal lo resuelva |
 | `enviar_notificaciones` | 1 min | Envía las filas `PENDIENTE` de `notificacion` por lotes. Reintenta con espera creciente y marca FALLIDA al quinto intento. Si el proveedor responde que el token no existe, desactiva el `dispositivo_push`. |
 | `alertas_vencimiento` | diaria, 06:00 hora de Bogotá | Genera `alerta_inventario` para los lotes que vencen dentro de `DIAS_ALERTA_VENCIMIENTO`. El índice único `uq_alerta_abierta` impide duplicados. |
 | `cuentas_sin_confirmar` | diaria | Elimina con la API de administración las cuentas de `fn_cuentas_sin_confirmar(DIAS_RETENCION_SIN_CONFIRMAR)` |
@@ -649,7 +668,8 @@ Los buckets `donaciones`, `evidencias` y `documentos-identidad` son **privados**
 | Secreto | Dónde vive |
 |---|---|
 | *Service role key*, cadena de conexión de `app_backend`, llave de Google del servidor, credenciales push | Variables del servicio en Railway, validadas al arrancar (`src/config/`). Si falta una, la API no inicia. |
-| Llave de Google del cliente (mapas en la app) | Distinta de la del servidor, restringida por paquete Android y por API |
+| Llave de Google del cliente (mapas en la app) | Distinta de la del servidor, restringida por paquete Android (+ SHA-1) y a Maps SDK for Android |
+| Llave de Google del panel web | Distinta de las anteriores, restringida por *referrer* HTTP y a Maps JavaScript API |
 
 ### 13.5 Ley 1581 de 2012
 
@@ -704,7 +724,11 @@ Cada cambio se verificó cargando la migración v3 **sin modificar** en PostgreS
 elementos Route Matrix / mes ≈ donaciones_con_≥2_candidatos × MAX_CANDIDATOS_MATRIX × 30
                              + rutas × (paradas + 2)²
 llamadas Compute Routes / mes ≈ rutas
+sesiones Autocomplete / mes   ≈ donaciones + solicitudes_voluntario + almacenes   (§6.3.1)
+llamadas Geocoding / mes      ≈ búsquedas sin sugerencia + pines soltados
 ```
+
+Places y Geocoding deben tener **cuotas diarias propias** en Cloud Console, para que una búsqueda abusiva nunca agote la Route Matrix de la asignación.
 
 Ejemplo: 200 × 10 × 30 = **60.000 elementos al mes** solo en asignación. Esa cifra debe compararse con el límite gratuito mensual de cada SKU y su precio **vigente** (Google cambió su modelo de facturación en marzo de 2025, referencia [6] del anteproyecto; **verificar antes de fijar parámetros**).
 

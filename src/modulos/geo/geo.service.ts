@@ -1,0 +1,108 @@
+import { Injectable } from '@nestjs/common';
+import type { Coordenada } from '../../comun/geo';
+import { GoogleLugaresService } from '../../comun/google/google-lugares.service';
+import { noEncontrado, Problema } from '../../comun/http/problema';
+import { PrismaService } from '../../comun/prisma/prisma.service';
+import type { AutocompletarDto, GeocodificarDto, InversaDto } from './geo.dto';
+
+/** Centro de Bogotá, si aún no hay banco registrado. */
+const CENTRO_POR_OMISION: Coordenada = { lat: 4.6533, lng: -74.0836 };
+
+/** Tope de consultas por usuario y minuto: protege el presupuesto de Google (§15.2). */
+export const LIMITE_POR_MINUTO = 60;
+const VENTANA_MS = 60_000;
+
+const noDisponible = () =>
+  new Problema(
+    503,
+    'geo-no-disponible',
+    'La búsqueda de direcciones no está disponible',
+    'Ubique el punto en el mapa o use el buscador del dispositivo',
+  );
+
+/**
+ * Proxy de búsqueda de direcciones para la app y el panel: la llave de
+ * servidor nunca sale de la API. Solo lectura: no escribe ubicaciones, que
+ * siguen llegando como CoordenadaDto a los endpoints de cada dominio.
+ */
+@Injectable()
+export class GeoService {
+  private readonly consultas = new Map<
+    string,
+    { inicio: number; cuenta: number }
+  >();
+  private centro?: Coordenada;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly lugares: GoogleLugaresService,
+  ) {}
+
+  async autocompletar(usuarioId: string, dto: AutocompletarDto) {
+    this.limitar(usuarioId);
+    const cerca =
+      dto.lat !== undefined && dto.lng !== undefined
+        ? { lat: dto.lat, lng: dto.lng }
+        : await this.centroBanco();
+    const sugerencias = await this.lugares.autocompletar(
+      dto.q,
+      dto.sesion,
+      cerca,
+    );
+    if (!sugerencias) throw noDisponible();
+    return { sugerencias };
+  }
+
+  async lugar(usuarioId: string, placeId: string, sesion: string) {
+    this.limitar(usuarioId);
+    if (!/^[\w-]{1,512}$/.test(placeId)) throw noEncontrado('Lugar');
+    const lugar = await this.lugares.detalle(placeId, sesion);
+    if (!lugar) throw noDisponible();
+    return lugar;
+  }
+
+  async geocodificar(usuarioId: string, dto: GeocodificarDto) {
+    this.limitar(usuarioId);
+    const r = await this.lugares.geocodificar(dto.direccion);
+    if (r === null) throw noDisponible();
+    if (!r) throw noEncontrado('Dirección');
+    return r;
+  }
+
+  async inversa(usuarioId: string, dto: InversaDto) {
+    this.limitar(usuarioId);
+    const r = await this.lugares.geocodificarInversa(dto);
+    if (r === null) throw noDisponible();
+    if (!r) throw noEncontrado('Dirección');
+    return { direccion: r.direccion };
+  }
+
+  /** Ventana fija por usuario, en memoria: la API corre como un solo proceso. */
+  private limitar(usuarioId: string): void {
+    if (!this.lugares.disponible) throw noDisponible();
+    const ahora = Date.now();
+    const actual = this.consultas.get(usuarioId);
+    if (!actual || ahora - actual.inicio >= VENTANA_MS) {
+      this.consultas.set(usuarioId, { inicio: ahora, cuenta: 1 });
+      return;
+    }
+    if (++actual.cuenta > LIMITE_POR_MINUTO) {
+      throw new Problema(
+        429,
+        'demasiadas-solicitudes',
+        'Demasiadas búsquedas de direcciones',
+        'Espere un minuto e intente de nuevo',
+      );
+    }
+  }
+
+  private async centroBanco(): Promise<Coordenada> {
+    if (this.centro) return this.centro;
+    const [banco] = await this.prisma.$queryRaw<Coordenada[]>`
+      SELECT ST_Y(ubicacion::geometry) AS lat, ST_X(ubicacion::geometry) AS lng
+        FROM banco_alimentos WHERE deleted_at IS NULL LIMIT 1`;
+    if (!banco) return CENTRO_POR_OMISION;
+    this.centro = banco;
+    return banco;
+  }
+}

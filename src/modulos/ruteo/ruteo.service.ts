@@ -48,6 +48,9 @@ import type {
 const SERVICIO_MIN = 5;
 /** Una ultima_ubicacion más vieja que esto no sirve como punto de partida. */
 const UBICACION_RECIENTE_MIN = 30;
+/** Regla de negocio: una ruta activa (PLANIFICADA o EN_CURSO) no dura más que esto desde su creación. */
+export const RUTA_MAX_ACTIVA_HORAS = 24;
+const MOTIVO_RUTA_VENCIDA = `La ruta superó ${RUTA_MAX_ACTIVA_HORAS} horas activa`;
 
 interface DonacionRuta extends Coordenada {
   id: string;
@@ -1004,6 +1007,74 @@ export class RuteoService {
     });
     for (const d of republicar) await this.donaciones.iniciarCascadaSegura(d);
     return this.detalle(usuario, id);
+  }
+
+  /**
+   * Tarea cancelar_rutas_vencidas (§7): una ruta PLANIFICADA o EN_CURSO creada hace más de
+   * RUTA_MAX_ACTIVA_HORAS se cancela, aunque ya lleve comida recogida. Sus recogidas sin hacer
+   * expiran (aviso al donante y al voluntario) y su asignación queda CANCELADA, que no cuenta
+   * como abandono. Lo ya recogido no cambia: queda en el historial de la ruta
+   * (recogidas_sin_entregar) para que el personal lo resuelva.
+   */
+  async cancelarRutasVencidas(lote = 50): Promise<number> {
+    return this.prisma.$transaction(
+      async (tx) => {
+        const rutas = await tx.$queryRaw<{ id: string; estado: string }[]>`
+          SELECT id, estado::text AS estado FROM ruta
+           WHERE estado IN ('PLANIFICADA','EN_CURSO')
+             AND created_at <= now() - make_interval(hours => ${RUTA_MAX_ACTIVA_HORAS}::int)
+           ORDER BY created_at
+           LIMIT ${lote}
+           FOR UPDATE SKIP LOCKED`;
+        for (const ruta of rutas) {
+          const recogidas = await tx.$queryRaw<
+            { donacion_id: string; estado: string }[]
+          >`
+            SELECT donacion_id, estado::text AS estado FROM parada_ruta
+             WHERE ruta_id = ${ruta.id}::uuid AND tipo = 'RECOGIDA' AND donacion_id IS NOT NULL`;
+          const pendientes = recogidas
+            .filter((p) => p.estado === 'PENDIENTE' || p.estado === 'EN_SITIO')
+            .map((p) => p.donacion_id);
+          for (const donacionId of pendientes) {
+            await this.asignacion.cerrarVigentes(tx, donacionId, 'CANCELADA', {
+              motivo: MOTIVO_RUTA_VENCIDA,
+              notificar: true,
+            });
+            await this.donaciones.expirar(
+              tx,
+              donacionId,
+              ['ASIGNADA', 'EN_RECOLECCION'],
+              MOTIVO_RUTA_VENCIDA,
+            );
+          }
+          await tx.parada_ruta.updateMany({
+            where: { ruta_id: ruta.id, estado: { in: ['PENDIENTE', 'EN_SITIO'] } },
+            data: { estado: 'OMITIDA' },
+          });
+          await tx.ruta.update({
+            where: { id: ruta.id },
+            data: { estado: 'CANCELADA', cancelada_at: new Date() },
+          });
+          await this.trazabilidad.registrar(tx, {
+            ambito: 'RUTA',
+            entidad: { rutaId: ruta.id },
+            anterior: ruta.estado,
+            nuevo: 'CANCELADA',
+            motivo: MOTIVO_RUTA_VENCIDA,
+            metadata: {
+              regla: 'RUTA_MAX_ACTIVA_HORAS',
+              horas: RUTA_MAX_ACTIVA_HORAS,
+              donaciones_expiradas: pendientes,
+              recogidas_sin_entregar: recogidas
+                .filter((p) => p.estado === 'COMPLETADA')
+                .map((p) => p.donacion_id),
+            },
+          });
+        }
+        return rutas.length;
+      },
+      { maxWait: 5_000, timeout: 60_000 },
+    );
   }
 
   private async parada(id: string) {

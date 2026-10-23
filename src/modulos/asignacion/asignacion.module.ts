@@ -6,6 +6,7 @@ import { NotificacionesModule } from '../notificaciones/notificaciones.module';
 import { AsignacionController } from './asignacion.controller';
 import { AsignacionService } from './asignacion.service';
 import { MotorAsignacionService } from './motor.service';
+import { RutasDinamicasService } from './rutas-dinamicas.service';
 
 /**
  * Donaciones y asignación dependen una de la otra: publicar dispara la cascada
@@ -19,7 +20,7 @@ import { MotorAsignacionService } from './motor.service';
     NotificacionesModule,
   ],
   controllers: [AsignacionController],
-  providers: [AsignacionService, MotorAsignacionService],
+  providers: [AsignacionService, MotorAsignacionService, RutasDinamicasService],
   exports: [AsignacionService, MotorAsignacionService],
 })
 export class AsignacionModule {}

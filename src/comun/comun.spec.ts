@@ -6,7 +6,7 @@ import {
 import { renderizarPlantilla } from '../modulos/notificaciones/plantilla';
 import { generarCodigo } from './codigos';
 import { ESLOGAN } from './correo/plantilla';
-import { distanciaKm } from './geo';
+import { decodificarPolilinea, distanciaKm } from './geo';
 import { codigoPostgres, violaUnicidad } from './http/errores-pg';
 import { aJson } from './http/serializacion.interceptor';
 import { fechaBogota } from './tiempo';
@@ -119,6 +119,7 @@ describe('serialización', () => {
   });
 });
 
+
 describe('correo de cuenta interna', () => {
   const dto = {
     email: 'asesor@ejemplo.com',
@@ -141,3 +142,18 @@ describe('correo de cuenta interna', () => {
     expect(html).not.toContain('<b>Ana</b>');
   });
 });
+
+describe('polilínea codificada de Google', () => {
+  it('decodifica el ejemplo de la documentación', () => {
+    expect(decodificarPolilinea('_p~iF~ps|U_ulLnnqC_mqNvxq`@')).toEqual([
+      { lat: 38.5, lng: -120.2 },
+      { lat: 40.7, lng: -120.95 },
+      { lat: 43.252, lng: -126.453 },
+    ]);
+  });
+
+  it('una cadena vacía no tiene puntos', () => {
+    expect(decodificarPolilinea('')).toEqual([]);
+  });
+});
+

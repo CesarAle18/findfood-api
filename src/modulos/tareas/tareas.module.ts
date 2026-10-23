@@ -5,6 +5,7 @@ import { AsignacionModule } from '../asignacion/asignacion.module';
 import { DonacionesModule } from '../donaciones/donaciones.module';
 import { InventarioModule } from '../inventario/inventario.module';
 import { NotificacionesModule } from '../notificaciones/notificaciones.module';
+import { RuteoModule } from '../ruteo/ruteo.module';
 import { TareasController } from './tareas.controller';
 import { TareasService } from './tareas.service';
 
@@ -16,6 +17,7 @@ import { TareasService } from './tareas.service';
     DonacionesModule,
     InventarioModule,
     NotificacionesModule,
+    RuteoModule,
   ],
   controllers: [TareasController],
   providers: [TareasService],
