@@ -28,7 +28,7 @@ Dynamic routes are the current design (`seguimiento` and `rutas-vencidas` suites
 ## Tasks
 
 - [x] T1 — `flujo-completo`: accepting yields `EN_RECOLECCION` and returns the route; the rest of the flow (arrival, confirmations, delivery, reception, history, rating, FEFO, push, KPIs) uses that route. History expectation updated to the new state sequence.
-- [ ] T2 — `asignacion`: "cancelar una donación asignada…" reflects the post-acceptance state (`EN_RECOLECCION` inside a dynamic route) and still asserts the offer closes and the volunteer is notified, or documents the new expected outcome.
+- [x] T2 — `asignacion`: "cancelar una donación asignada…" reflects the post-acceptance state (`EN_RECOLECCION` inside a dynamic route) and still asserts the offer closes and the volunteer is notified, or documents the new expected outcome.
 - [ ] T3 — `ruteo`: grouping/ordering, dispersion, capacity and foreign-assignment rules exercised through successive acceptances (`incorporar`) instead of `POST /v1/rutas`; the `asignada()` helper no longer collides with routes left active by earlier tests.
 
 ## Acceptance criteria
@@ -51,8 +51,10 @@ Dynamic routes are the current design (`seguimiento` and `rutas-vencidas` suites
 ## Progress
 
 - Baseline: 3 suites / 17 tests failing (CI output, 2026-10-24); reproduced locally: `npm run test:e2e -- test/flujo-completo test/asignacion test/ruteo` → 17 failed, 19 passed.
-- T1 (route: delegated direct, writer): accept now asserts `{ id, estado: ACEPTADA, ruta: { estado: EN_CURSO, actualizada: true } }`, donation `EN_RECOLECCION`; the manual `POST /v1/rutas` + `/iniciar` steps were replaced by reading the route returned on accept (`EN_CURSO`, RECOGIDA + ENTREGA at the dry sede, no geometry without Google) and a no-op `/iniciar`. The DONACION history sequence is unchanged (accept writes ASIGNADA and EN_RECOLECCION in one transaction). Check: `npm run test:e2e -- test/flujo-completo` → 14 passed, 14 total. Commit: `test(asignacion): flujo completo sobre la ruta dinámica creada al aceptar` (hash recorded with T2, since a commit cannot contain its own hash).
+- T1 (route: delegated direct, writer): accept now asserts `{ id, estado: ACEPTADA, ruta: { estado: EN_CURSO, actualizada: true } }`, donation `EN_RECOLECCION`; the manual `POST /v1/rutas` + `/iniciar` steps were replaced by reading the route returned on accept (`EN_CURSO`, RECOGIDA + ENTREGA at the dry sede, no geometry without Google) and a no-op `/iniciar`. The DONACION history sequence is unchanged (accept writes ASIGNADA and EN_RECOLECCION in one transaction). Check: `npm run test:e2e -- test/flujo-completo` → 14 passed, 14 total. Commit: `test(asignacion): flujo completo sobre la ruta dinámica creada al aceptar` — `7d34483`.
+- T2 (route: delegated direct, writer): `DonacionesService.cancelar` (`src/modulos/donaciones/donaciones.service.ts:882-930`) lets the owner cancel only in BORRADOR/PUBLICADA/ASIGNADA/EXPIRADA; ADMIN also in EN_RECOLECCION. Since accepting now lands in EN_RECOLECCION, the test asserts the donor gets 409 `donacion-no-cancelable` (offer still vigente), then the ADMIN cancels: offer closed, the route stop becomes OMITIDA, the volunteer gets one DONACION_CANCELADA, and another donor still gets 404. Check: `npm run test:e2e -- test/asignacion` → 16 passed, 16 total. Commit: `test(asignacion): cancelar una donación en recolección exige al ADMIN` (hash recorded with T3).
+- Open product question (not changed): with dynamic routes the donor can no longer cancel once a volunteer accepts, even though nothing was picked up yet (the service comment says the owner cancels "antes de la recogida").
 
 ## Next step
 
-T2.
+T3.
