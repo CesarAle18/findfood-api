@@ -20,8 +20,12 @@ export const RECALCULO_MS = 120_000;
 export const DESVIO_KM = 2;
 const MAX_CACHE = 500;
 
-export interface ParadaSeguimiento extends Coordenada {
+/** Lo mínimo de una parada para estimar el tramo hacia ella. */
+export interface ParadaDestino extends Coordenada {
   id: string;
+}
+
+export interface ParadaSeguimiento extends ParadaDestino {
   orden: number;
   tipo: string;
   estado: string;
@@ -42,6 +46,23 @@ export interface Calculo {
   origen: Coordenada;
   at: number;
   tramo: Tramo;
+}
+
+/** voluntario.ultima_ubicacion leída con ST_Y/ST_X, y su hora. */
+export interface UltimaUbicacion {
+  lat: number | null;
+  lng: number | null;
+  ultima_at: Date | null;
+}
+
+/** La ultima_ubicacion si tiene UBICACION_RECIENTE_MIN o menos; si no, null. */
+export function posicionReciente(
+  u: UltimaUbicacion,
+  ahora = new Date(),
+): { lat: number; lng: number; at: Date } | null {
+  if (!u.ultima_at || u.lat === null || u.lng === null) return null;
+  if (minutosEntre(u.ultima_at, ahora) > UBICACION_RECIENTE_MIN) return null;
+  return { lat: u.lat, lng: u.lng, at: u.ultima_at };
 }
 
 /** ¿Sirve el cálculo guardado para esta parada y esta posición? */
@@ -104,30 +125,38 @@ export class SeguimientoService {
        ORDER BY orden LIMIT 1`;
     if (!parada) return vacio;
 
-    const reciente =
-      ruta.ultima_at &&
-      ruta.lat !== null &&
-      ruta.lng !== null &&
-      minutosEntre(ruta.ultima_at, new Date()) <= UBICACION_RECIENTE_MIN;
+    const reciente = posicionReciente(ruta);
     const origen =
       dto.lat !== undefined && dto.lng !== undefined
         ? { lat: dto.lat, lng: dto.lng, fuente: 'CONSULTA' as const }
         : reciente
-          ? { lat: ruta.lat!, lng: ruta.lng!, fuente: 'ULTIMA_UBICACION' as const }
+          ? { lat: reciente.lat, lng: reciente.lng, fuente: 'ULTIMA_UBICACION' as const }
           : null;
     if (!origen) return { ...vacio, parada };
 
+    const tramo = await this.tramoHacia(rutaId, parada, origen);
+    return { ...vacio, parada, origen, tramo };
+  }
+
+  /**
+   * Tramo desde `origen` hasta `parada`, que debe ser la siguiente parada abierta de la
+   * ruta: la caché es una por ruta y la comparten el voluntario, el panel y el donante.
+   */
+  private async tramoHacia(
+    rutaId: string,
+    parada: ParadaDestino,
+    origen: Coordenada,
+  ): Promise<Tramo> {
     const ahora = Date.now();
     const previo = this.calculos.get(rutaId);
-    const tramo = vigente(previo, parada.id, origen, ahora)
+    return vigente(previo, parada.id, origen, ahora)
       ? previo.tramo
-      : await this.calcular(rutaId, parada, origen, ahora);
-    return { ...vacio, parada, origen, tramo };
+      : this.calcular(rutaId, parada, origen, ahora);
   }
 
   private async calcular(
     rutaId: string,
-    parada: ParadaSeguimiento,
+    parada: ParadaDestino,
     origen: Coordenada,
     ahora: number,
   ): Promise<Tramo> {
