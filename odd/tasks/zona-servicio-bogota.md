@@ -35,3 +35,5 @@ Google searches are only restricted to Colombia (a 50 km bias around Bogotá), s
   - Decision (user, option B): the e2e env (`test/configuracion/entorno.ts`) widens the area to Colombia (`-4.3,-79.1,13.5,-66.8`) so the per-city suite isolation keeps working. `test/zona-servicio.e2e-spec.ts` sets it back to Bogotá for its own run.
   - Checks: `npm run lint` OK (one existing warning in rutas-dinamicas.service.ts), `npm run typecheck` OK, `npm test` 117/117 OK. e2e has not run: Docker Desktop is not running (`ECONNREFUSED 127.0.0.1:54329`).
 - Next: start Docker, run `npm run db:local` and the full `npm run test:e2e`, and check off T1 if it passes. Then T2 (app).
+- RDD: `gentle-ai review assess --base-ref 6e6d392 --committed-only` (untracked excluded) gave medium, `review_due` (`slice_budget_reached`, 618 lines). The preflight STATUS asked for an intended-untracked selection, and submitting an empty selection was refused (`invalid_request`). Native review is unavailable, pending the user's decision.
+- App T2 (`b1da8af`): assessed medium, `under_budget`, so its review is still pending in the slice.
