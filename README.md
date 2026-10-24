@@ -95,6 +95,7 @@ En Postman, importa la colección y `postman/FindFood-local.postman_environment.
 | `GET /v1/me/notificaciones` · `POST …/{id}/leer` · `POST …/leer-todas` | Bandeja dentro de la app (§9.3). Leer una notificación en cola evita su push. |
 | `GET /v1/evidencias?parada_id=…` | Evidencias con URL firmada de 5 min |
 | `POST /v1/donaciones/{id}/reasignar` | ADMIN o ASESOR retiran la asignación y reinician la cascada |
+| `GET /v1/donaciones/{id}/seguimiento` | El donante sigue al voluntario hacia su punto y luego al banco, hasta la entrega (§9.2). De las demás paradas solo recibe cuántas hay antes de su destino |
 | `GET /v1/rutas` · `POST /v1/rutas/{id}/cancelar` · `POST /v1/paradas/{id}/fallida` | Rutas propias; cancelar antes de iniciar; recogida imposible con incidencia |
 | `GET /v1/incidencias/{id}` · `POST …/{id}/revisar` | Detalle y toma de la incidencia por el personal |
 | `POST /v1/almacenes` | ADMIN crea sedes |
@@ -145,3 +146,8 @@ En Postman, importa la colección y `postman/FindFood-local.postman_environment.
     - `POST /v1/panel/recuperar-contrasena`: pide a Supabase el correo de recuperación solo para personal ACTIVO. Responde siempre 202 con el mismo mensaje, para no revelar qué correos existen ni su rol.
     - El correo es la plantilla **Reset Password** de Supabase: para que lleve un código debe mostrar `{{ .Token }}` (Authentication → Email Templates). El panel canjea el código con `verifyOtp({ email, token, type: 'recovery' })` y cambia la contraseña con `updateUser({ password })`.
     - `POST /auth/v1/recover` de Supabase sigue abierto porque lo usa la app móvil. Quien lo llame directo con un correo de donante recibe el correo normal de la app, no acceso al panel.
+17. **Seguimiento del donante hasta la entrega (API-06)** ([`20261023000000_seguimiento_donante.sql`](supabase/migrations/20261023000000_seguimiento_donante.sql), [`20261023000001_seguimiento_donante_privacidad.sql`](supabase/migrations/20261023000001_seguimiento_donante_privacidad.sql)). El documento original cortaba la ubicación en vivo al recoger. Ahora el donante ve al voluntario también camino al banco, hasta que su donación se entrega (§9.2):
+    - La regla vive en dos lugares que deben coincidir: `fn_rt_es_donante_de_ruta` (Realtime) y `ventanaDonante()` (`GET /v1/donaciones/{id}/seguimiento`). Una prueba e2e verifica en cada fase que Realtime deja escuchar el canal exactamente cuando el endpoint entrega `ruta_id`. Las dos miran la misma ENTREGA: la de mayor `orden` de la ruta.
+    - Hacia su punto, si hay recogidas de otros donantes antes, el donante ve el punto del voluntario y cuántas paradas faltan, pero no el tramo ni datos de esas paradas.
+    - Camino al banco, mientras otra recogida de la ruta siga PENDIENTE o EN_SITIO, el donante no ve la posición del voluntario (ni por Realtime ni en `voluntario_posicion`), solo la fase y cuántas paradas faltan: estando en esa recogida, su posición revelaría la dirección de otro donante. Cuando no quedan recogidas abiertas, la posición vuelve.
+    - El voluntario también tiene el rol DONANTE, así que en este endpoint recibe 404 (no es el dueño), no 403. Su vista es `GET /v1/rutas/{id}/seguimiento`.

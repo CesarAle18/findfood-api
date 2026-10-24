@@ -129,3 +129,27 @@ export class ParadasController {
     return this.ruteo.fallida(usuario, id, dto);
   }
 }
+
+/**
+ * Vive en ruteo y no en donaciones: RuteoModule ya importa DonacionesModule, así que
+ * ponerlo allá crearía una dependencia circular.
+ */
+@ApiTags('ruteo')
+@ApiBearerAuth()
+@Controller('donaciones')
+export class SeguimientoDonacionController {
+  constructor(private readonly seguimientos: SeguimientoService) {}
+
+  /**
+   * Seguimiento en vivo para el donante (API-06): fase, posición reciente del voluntario
+   * y llegada estimada a su punto o al banco, hasta que la donación se entrega.
+   */
+  @Get(':id/seguimiento')
+  @Roles('DONANTE', 'ADMIN', 'ASESOR_BANCO')
+  seguimiento(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.seguimientos.seguimientoDonacion(usuario, id);
+  }
+}

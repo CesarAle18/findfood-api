@@ -327,26 +327,47 @@ describe('Asignación', () => {
       expect(incidencias.body.datos).toHaveLength(1);
     });
 
-    it('cancelar una donación asignada cierra la asignación y avisa al voluntario', async () => {
+    it('una donación en recolección solo la cancela el ADMIN: cierra la asignación, omite la parada y avisa al voluntario', async () => {
       const id = await crearDonacion(donante);
       await publicar(donante, id);
       const [oferta] = await ofertaVigente(id);
-      await ctx
+      // Aceptar la incorpora a la ruta del voluntario: ya está EN_RECOLECCION.
+      const aceptada = await ctx
         .como(v1)
         .post(`/v1/asignaciones/${oferta.id}/aceptar`)
         .expect(200);
-      await ctx
+      const rutaId: string = aceptada.body.ruta.id;
+
+      // El dueño cancela solo antes de la recogida.
+      const tarde = await ctx
         .como(donante)
         .post(`/v1/donaciones/${id}/cancelar`)
         .send({
           motivo_id: cat.motivo('CANCELACION_DONACION', 'CAMBIO_DE_PLANES'),
         })
+        .expect(409);
+      expect(tarde.body.type).toBe('donacion-no-cancelable');
+      expect(await ofertaVigente(id)).toHaveLength(1);
+
+      const r = await ctx
+        .como(admin)
+        .post(`/v1/donaciones/${id}/cancelar`)
+        .send({
+          motivo_id: cat.motivo('CANCELACION_DONACION', 'CANCELADA_POR_BANCO'),
+          observacion: 'El donante ya no puede entregarla',
+        })
         .expect(200);
+      expect(r.body.estado).toBe('CANCELADA');
       expect(await ofertaVigente(id)).toEqual([]);
+      const { rows: paradas } = await ctx.sql.query<{ estado: string }>(
+        `SELECT estado::text FROM parada_ruta WHERE ruta_id = $1 AND donacion_id = $2`,
+        [rutaId, id],
+      );
+      expect(paradas).toEqual([{ estado: 'OMITIDA' }]);
       const aviso = await ctx.sql.query(
         `SELECT 1 FROM notificacion n JOIN tipo_notificacion t ON t.id = n.tipo_notificacion_id
-          WHERE n.usuario_id = $1 AND t.codigo = 'DONACION_CANCELADA'`,
-        [v1.id],
+          WHERE n.usuario_id = $1 AND n.donacion_id = $2 AND t.codigo = 'DONACION_CANCELADA'`,
+        [v1.id, id],
       );
       expect(aviso.rowCount).toBe(1);
       // Otro donante no puede cancelarla ni verla.

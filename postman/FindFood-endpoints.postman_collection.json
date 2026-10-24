@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "6d0f3a52-8f1e-4c1b-9a77-f1ad00e0d901",
     "name": "FindFood API · todos los endpoints",
-    "description": "Los 78 endpoints de la API, agrupados por módulo, más la carpeta de sesión de Supabase Auth (registro, login, códigos). **Generada desde el código** con `npm run postman:generar`: no la edites a mano, regenérala cuando cambie un controlador o un DTO.\n\nPara recorrer el flujo completo en orden (donación → recepción) usa `FindFood.postman_collection.json`; esta colección es el catálogo de referencia.\n\n**Local:** `npm run db:local`, `npm run datos:prueba`, `npm run start:local`, importa `postman/FindFood-local.postman_environment.json` y selecciónalo. Los tokens de cada rol se firman solos.\n\n**Proyecto real:** crea un environment con `base_url`, completa `supabase_anon_key` y ejecuta `Sesión (Supabase Auth) → Iniciar sesión`: guarda `token_sesion`, que se usa para todos los roles.\n\n- Cada petición usa el token del primer rol permitido; la descripción lista los demás.\n- Crear y listar guardan el `id` en variables de colección (`donacion_id`, `ruta_id`, `sede_id`…), que usan las rutas con `:id`.\n- Los parámetros de consulta vienen desactivados: actívalos según lo que quieras filtrar.\n- Errores en application/problem+json con un `type` estable.",
+    "description": "Los 86 endpoints de la API, agrupados por módulo, más la carpeta de sesión de Supabase Auth (registro, login, códigos). **Generada desde el código** con `npm run postman:generar`: no la edites a mano, regenérala cuando cambie un controlador o un DTO.\n\nPara recorrer el flujo completo en orden (donación → recepción) usa `FindFood.postman_collection.json`; esta colección es el catálogo de referencia.\n\n**Local:** `npm run db:local`, `npm run datos:prueba`, `npm run start:local`, importa `postman/FindFood-local.postman_environment.json` y selecciónalo. Los tokens de cada rol se firman solos.\n\n**Proyecto real:** crea un environment con `base_url`, completa `supabase_anon_key` y ejecuta `Sesión (Supabase Auth) → Iniciar sesión`: guarda `token_sesion`, que se usa para todos los roles.\n\n- Cada petición usa el token del primer rol permitido; la descripción lista los demás.\n- Crear y listar guardan el `id` en variables de colección (`donacion_id`, `ruta_id`, `sede_id`…), que usan las rutas con `:id`.\n- Los parámetros de consulta vienen desactivados: actívalos según lo que quieras filtrar.\n- Errores en application/problem+json con un `type` estable.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -916,13 +916,19 @@
                 {
                   "key": "incluir",
                   "value": "",
-                  "description": "Catálogos a devolver, separados por coma. Por defecto, todos. Valores: categorias_alimento, tipos_alimento, unidades_medida, tipos_vehiculo, motivos, tipos_incidencia, tipos_destino_distribucion",
+                  "description": "Catálogos a devolver, separados por coma. Por defecto, todos. Valores: categorias_alimento, tipos_alimento, unidades_medida, tipos_vehiculo, motivos, tipos_incidencia, tipos_destino_distribucion, aspectos_calificacion",
                   "disabled": true
                 },
                 {
                   "key": "ambito",
                   "value": "",
                   "description": "Filtra los motivos por ámbito (p. ej. RECHAZO_ASIGNACION) · Valores: RECHAZO_ASIGNACION, ABANDONO_ASIGNACION, CANCELACION_DONACION, RECHAZO_RECEPCION, RECHAZO_VERIFICACION",
+                  "disabled": true
+                },
+                {
+                  "key": "rol_calificado",
+                  "value": "",
+                  "description": "Filtra los aspectos de calificación por rol calificado (el donante califica al VOLUNTARIO) · Valores: DONANTE, VOLUNTARIO",
                   "disabled": true
                 }
               ]
@@ -1063,6 +1069,57 @@
               }
             }
           ]
+        },
+        {
+          "name": "Cambiar estado · PATCH /admin/usuarios/{id}/estado",
+          "request": {
+            "method": "PATCH",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/usuarios/:id/estado",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "usuarios",
+                ":id",
+                "estado"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{usuario_id}}"
+                }
+              ]
+            },
+            "description": "`PATCH /v1/admin/usuarios/{id}/estado`\n\nRoles: ADMIN. Usa `{{token_admin}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nCuerpo: `CambiarEstadoUsuarioDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"ACTIVO\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
         },
         {
           "name": "Suspender · POST /admin/usuarios/{id}/suspender",
@@ -1413,6 +1470,49 @@
               ]
             },
             "description": "`GET /v1/admin/parametros`\n\nRoles: ADMIN. Usa `{{token_admin}}`; cámbialo por el de otro rol permitido si lo necesitas."
+          }
+        },
+        {
+          "name": "Actualizar parámetros · PUT /admin/parametros",
+          "request": {
+            "method": "PUT",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/admin/parametros",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "parametros"
+              ]
+            },
+            "description": "`PUT /v1/admin/parametros`\n\nRoles: ADMIN. Usa `{{token_admin}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nCuerpo: `ActualizarParametrosDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"valores\": [\n    {\n      \"clave\": \"PESO_PROXIMIDAD\",\n      \"valor\": \"Texto de ejemplo\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
           }
         },
         {
@@ -2585,7 +2685,7 @@
             "description": "`POST /v1/asignaciones/{id}/calificacion`\n\nRoles: DONANTE, VOLUNTARIO. Usa `{{token_donante}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nCuerpo: `CalificacionDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"puntaje\": 5\n}",
+              "raw": "{\n  \"puntaje\": 5,\n  \"aspectos\": [\n    \"PUNTUALIDAD\",\n    \"CUIDADO\"\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2771,6 +2871,69 @@
                     "exec": [
                       "const cuerpo = pm.response.json();",
                       "if (cuerpo.paradas?.[0]?.id) pm.collectionVariables.set('parada_id', cuerpo.paradas[0].id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Seguimiento · GET /rutas/{id}/seguimiento",
+              "request": {
+                "method": "GET",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{token_voluntario}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/rutas/:id/seguimiento",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "rutas",
+                    ":id",
+                    "seguimiento"
+                  ],
+                  "query": [
+                    {
+                      "key": "lat",
+                      "value": "4.6533",
+                      "description": "",
+                      "disabled": true
+                    },
+                    {
+                      "key": "lng",
+                      "value": "-74.0836",
+                      "description": "",
+                      "disabled": true
+                    }
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{ruta_id}}"
+                    }
+                  ]
+                },
+                "description": "`GET /v1/rutas/{id}/seguimiento`\n\nRoles: VOLUNTARIO, ASESOR_BANCO, ADMIN. Usa `{{token_voluntario}}`; cámbialo por el de otro rol permitido si lo necesitas."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const cuerpo = pm.response.json();",
+                      "const lista = Array.isArray(cuerpo) ? cuerpo : cuerpo.datos;",
+                      "if (lista?.[0]?.id && !pm.collectionVariables.get('ruta_id')) pm.collectionVariables.set('ruta_id', lista[0].id);"
                     ]
                   }
                 }
@@ -2980,7 +3143,7 @@
                 "description": "`POST /v1/paradas/{id}/confirmar`\n\nRoles: VOLUNTARIO, ASESOR_BANCO. Usa `{{token_voluntario}}`; cámbialo por el de otro rol permitido si lo necesitas.\n\nCuerpo: `ConfirmarParadaDto` (ver /docs). El ejemplo trae los campos obligatorios y los que tienen ejemplo.",
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"peso_confirmado_kg\": 10,\n  \"ubicacion\": {\n    \"lat\": 4.6533,\n    \"lng\": -74.0836\n  },\n  \"confirmada_en_dispositivo\": \"{{$isoTimestamp}}\"\n}",
+                  "raw": "{\n  \"peso_confirmado_kg\": 10,\n  \"ubicacion\": {\n    \"lat\": 4.6533,\n    \"lng\": -74.0836\n  },\n  \"estado_producto\": \"BUENO\",\n  \"confirmada_en_dispositivo\": \"{{$isoTimestamp}}\"\n}",
                   "options": {
                     "raw": {
                       "language": "json"
@@ -3058,6 +3221,60 @@
                     "exec": [
                       "const cuerpo = pm.response.json();",
                       "if (pm.response.code < 300 && cuerpo.id) pm.collectionVariables.set('parada_id', cuerpo.id);"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "donaciones",
+          "item": [
+            {
+              "name": "Seguimiento · GET /donaciones/{id}/seguimiento",
+              "request": {
+                "method": "GET",
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{token_donante}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/v1/donaciones/:id/seguimiento",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "donaciones",
+                    ":id",
+                    "seguimiento"
+                  ],
+                  "variable": [
+                    {
+                      "key": "id",
+                      "value": "{{donacion_id}}"
+                    }
+                  ]
+                },
+                "description": "`GET /v1/donaciones/{id}/seguimiento`\n\nRoles: DONANTE, ADMIN, ASESOR_BANCO. Usa `{{token_donante}}`; cámbialo por el de otro rol permitido si lo necesitas."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const cuerpo = pm.response.json();",
+                      "const lista = Array.isArray(cuerpo) ? cuerpo : cuerpo.datos;",
+                      "if (lista?.[0]?.id && !pm.collectionVariables.get('donacion_id')) pm.collectionVariables.set('donacion_id', lista[0].id);"
                     ]
                   }
                 }
@@ -4426,6 +4643,190 @@
               ]
             },
             "description": "`GET /v1/kpis/resumen`\n\nRoles: ASESOR_BANCO, ADMIN. Usa `{{token_asesor}}`; cámbialo por el de otro rol permitido si lo necesitas."
+          }
+        }
+      ]
+    },
+    {
+      "name": "geo",
+      "item": [
+        {
+          "name": "Autocompletar · GET /geo/autocompletar",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/geo/autocompletar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "geo",
+                "autocompletar"
+              ],
+              "query": [
+                {
+                  "key": "sesion",
+                  "value": "",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "q",
+                  "value": "Calle 72 # 10",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "lat",
+                  "value": "",
+                  "description": "Sesga los resultados hacia este punto (por omisión, el banco)",
+                  "disabled": true
+                },
+                {
+                  "key": "lng",
+                  "value": "",
+                  "description": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "`GET /v1/geo/autocompletar`\n\nCualquier cuenta autenticada. Usa `{{token_admin}}`."
+          }
+        },
+        {
+          "name": "Lugar · GET /geo/lugares/{placeId}",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/geo/lugares/:placeId",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "geo",
+                "lugares",
+                ":placeId"
+              ],
+              "query": [
+                {
+                  "key": "sesion",
+                  "value": "",
+                  "description": "",
+                  "disabled": true
+                }
+              ],
+              "variable": [
+                {
+                  "key": "placeId",
+                  "value": "{{placeId}}"
+                }
+              ]
+            },
+            "description": "`GET /v1/geo/lugares/{placeId}`\n\nCualquier cuenta autenticada. Usa `{{token_admin}}`."
+          }
+        },
+        {
+          "name": "Geocodificar · GET /geo/geocodificar",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/geo/geocodificar",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "geo",
+                "geocodificar"
+              ],
+              "query": [
+                {
+                  "key": "direccion",
+                  "value": "Calle 72 # 10-34, Bogotá",
+                  "description": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "`GET /v1/geo/geocodificar`\n\nCualquier cuenta autenticada. Usa `{{token_admin}}`."
+          }
+        },
+        {
+          "name": "Inversa · GET /geo/inversa",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token_admin}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/geo/inversa",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "geo",
+                "inversa"
+              ],
+              "query": [
+                {
+                  "key": "lat",
+                  "value": "4.6533",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "lng",
+                  "value": "-74.0836",
+                  "description": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "`GET /v1/geo/inversa`\n\nCualquier cuenta autenticada. Usa `{{token_admin}}`."
           }
         }
       ]
