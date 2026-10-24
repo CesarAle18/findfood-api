@@ -9,18 +9,24 @@ import {
   prepararBanco,
 } from './utilidades/escenario';
 
-/** Ruteo y trabajo en calle (§8): agrupación, orden de paradas, fallas. */
+/**
+ * Ruteo y trabajo en calle (§8): agrupación, orden de paradas, fallas. Con rutas
+ * dinámicas, cada aceptación incorpora la recogida a la ruta EN_CURSO del voluntario;
+ * POST /v1/rutas solo lo usa la flota del banco.
+ */
 describe('Ruteo', () => {
   const ZONA = { lat: 7.1, lng: -73.1 };
   let ctx: ContextoPruebas;
   let admin: Cuenta;
+  let asesor: Cuenta;
   let cat: Catalogos;
   let voluntario: Cuenta & { voluntarioId: string };
 
-  async function asignada(
+  /** Crea y publica una donación; la cascada la ofrece al voluntario de la prueba. */
+  async function publicada(
     punto: { lat: number; lng: number },
     opciones: { peso?: number; tipo?: string; horas?: number } = {},
-  ): Promise<string> {
+  ): Promise<{ id: string; donante: Cuenta; ofertaId: string }> {
     const donante = await ctx.cuenta();
     const d = await ctx
       .como(donante)
@@ -42,22 +48,48 @@ describe('Ruteo', () => {
       .como(donante)
       .post(`/v1/donaciones/${d.body.id}/publicar`)
       .expect(200);
-    const { rows } = await ctx.sql.query<{ id: string }>(
-      `SELECT id FROM asignacion WHERE donacion_id = $1 AND estado = 'OFRECIDA'`,
+    const { rows } = await ctx.sql.query<{ id: string; voluntario_id: string }>(
+      `SELECT id, voluntario_id FROM asignacion WHERE donacion_id = $1 AND estado = 'OFRECIDA'`,
       [d.body.id],
     );
-    await ctx
+    expect(rows[0].voluntario_id).toBe(voluntario.voluntarioId);
+    return { id: d.body.id, donante, ofertaId: rows[0].id };
+  }
+
+  /** Publica y acepta: la donación entra a la ruta dinámica del voluntario. */
+  async function asignada(
+    punto: { lat: number; lng: number },
+    opciones: { peso?: number; tipo?: string; horas?: number } = {},
+  ): Promise<{ donacionId: string; rutaId: string }> {
+    const { id, ofertaId } = await publicada(punto, opciones);
+    const r = await ctx
       .como(voluntario)
-      .post(`/v1/asignaciones/${rows[0].id}/aceptar`)
+      .post(`/v1/asignaciones/${ofertaId}/aceptar`)
       .expect(200);
-    return d.body.id;
+    expect(r.body.ruta).toMatchObject({ estado: 'EN_CURSO', actualizada: true });
+    return { donacionId: id, rutaId: r.body.ruta.id };
+  }
+
+  async function ruta(id: string, como: Cuenta = voluntario) {
+    return (await ctx.como(como).get(`/v1/rutas/${id}`).expect(200)).body;
   }
 
   beforeAll(async () => {
     ctx = await ContextoPruebas.crear();
     admin = await ctx.admin();
+    asesor = await ctx.asesor();
     cat = await catalogos(ctx, admin);
     await prepararBanco(ctx, admin, ZONA);
+  });
+
+  // Una ruta dinámica sigue EN_CURSO hasta la entrega: cada caso usa un voluntario nuevo
+  // y apaga a los anteriores para que no compitan por las ofertas.
+  beforeEach(async () => {
+    await ctx.sql.query(
+      `UPDATE voluntario SET disponible = false
+        WHERE ST_DWithin(ubicacion_base, ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography, 60000)`,
+      [ZONA.lat, ZONA.lng],
+    );
     voluntario = await ctx.voluntario(admin, ZONA, { capacidad_carga_kg: 100 });
   });
 
@@ -65,72 +97,71 @@ describe('Ruteo', () => {
     await ctx.cerrar();
   });
 
-  it('agrupa varias recogidas cercanas y las ordena por vecino más cercano + 2-opt', async () => {
+  it('agrupa las recogidas aceptadas en una ruta y las ordena por vecino más cercano + 2-opt', async () => {
     // Tres puntos en línea: el orden óptimo desde la base es cerca → medio → lejos.
     const lejos = await asignada({ lat: ZONA.lat + 0.018, lng: ZONA.lng });
     const cerca = await asignada({ lat: ZONA.lat + 0.004, lng: ZONA.lng });
     const medio = await asignada({ lat: ZONA.lat + 0.011, lng: ZONA.lng });
+    // Una sola ruta activa: cada aceptación la reoptimiza.
+    expect(new Set([lejos.rutaId, cerca.rutaId, medio.rutaId]).size).toBe(1);
 
-    const r = await ctx
-      .como(voluntario)
-      .post('/v1/rutas')
-      .send({ donacion_ids: [lejos, cerca, medio], origen: ZONA })
-      .expect(201);
-    const recogidas = r.body.paradas.filter(
+    const r = await ruta(lejos.rutaId);
+    expect(r.estado).toBe('EN_CURSO');
+    const recogidas = r.paradas.filter(
       (p: { tipo: string }) => p.tipo === 'RECOGIDA',
     );
     expect(
       recogidas.map((p: { donacion_id: string }) => p.donacion_id),
-    ).toEqual([cerca, medio, lejos]);
-    expect(r.body.paradas.at(-1).tipo).toBe('ENTREGA');
+    ).toEqual([cerca.donacionId, medio.donacionId, lejos.donacionId]);
+    expect(r.paradas.at(-1).tipo).toBe('ENTREGA');
     const llegadas = recogidas.map((p: { hora_estimada_llegada: string }) =>
       new Date(p.hora_estimada_llegada).getTime(),
     );
     expect([...llegadas].sort((a, b) => a - b)).toEqual(llegadas);
-    expect(r.body.peso_total_estimado_kg).toBe(60);
+    expect(r.peso_total_estimado_kg).toBe(60);
 
-    // Cancelar una ruta no iniciada libera las asignaciones para reagruparlas.
-    await ctx
+    // La ruta dinámica ya está en curso: no se cancela como una planificada.
+    const cancelar = await ctx
       .como(voluntario)
-      .post(`/v1/rutas/${r.body.id}/cancelar`)
-      .expect(200);
-    const otra = await ctx
-      .como(voluntario)
-      .post('/v1/rutas')
-      .send({ donacion_ids: [cerca] })
-      .expect(201);
-    await ctx
-      .como(voluntario)
-      .post(`/v1/rutas/${otra.body.id}/cancelar`)
-      .expect(200);
+      .post(`/v1/rutas/${lejos.rutaId}/cancelar`)
+      .expect(409);
+    expect(cancelar.body.type).toBe('ruta-no-cancelable');
   });
 
-  it('reglas de agrupación: dispersión, capacidad y asignaciones ajenas', async () => {
+  it('reglas al aceptar: capacidad de la ruta y asignaciones ajenas', async () => {
     const aqui = await asignada({
       lat: ZONA.lat + 0.001,
       lng: ZONA.lng + 0.001,
     });
-    const alla = await asignada({
-      lat: ZONA.lat + 0.08,
-      lng: ZONA.lng + 0.001,
-    });
-    const dispersas = await ctx
-      .como(voluntario)
-      .post('/v1/rutas')
-      .send({ donacion_ids: [aqui, alla] })
-      .expect(422);
-    expect(dispersas.body.type).toBe('donaciones-dispersas');
 
-    const pesada = await asignada(
+    // 20 kg en la ruta + 90 kg superan los 100 kg del vehículo: la oferta se rechaza.
+    const pesada = await publicada(
       { lat: ZONA.lat + 0.002, lng: ZONA.lng + 0.002 },
       { peso: 90 },
     );
     const excede = await ctx
       .como(voluntario)
-      .post('/v1/rutas')
-      .send({ donacion_ids: [aqui, pesada] })
+      .post(`/v1/asignaciones/${pesada.ofertaId}/aceptar`)
       .expect(422);
-    expect(excede.body.type).toBe('excede-capacidad');
+    expect(excede.body.type).toBe('RUTA_SIN_CAPACIDAD');
+    const { rows } = await ctx.sql.query<{ estado: string }>(
+      `SELECT estado::text FROM asignacion WHERE id = $1`,
+      [pesada.ofertaId],
+    );
+    expect(rows[0].estado).toBe('RECHAZADA');
+    const r = await ruta(aqui.rutaId);
+    expect(
+      r.paradas.map((p: { donacion_id: string | null }) => p.donacion_id),
+    ).toEqual([aqui.donacionId, null]);
+    expect(r.peso_total_estimado_kg).toBe(20);
+
+    // La donación ya está en la ruta dinámica: no se vuelve a agrupar a mano.
+    const reagrupar = await ctx
+      .como(voluntario)
+      .post('/v1/rutas')
+      .send({ donacion_ids: [aqui.donacionId] })
+      .expect(409);
+    expect(reagrupar.body.type).toBe('asignacion-invalida');
 
     const otro = await ctx.voluntario(admin, {
       lat: ZONA.lat + 0.3,
@@ -139,26 +170,49 @@ describe('Ruteo', () => {
     const ajena = await ctx
       .como(otro)
       .post('/v1/rutas')
-      .send({ donacion_ids: [aqui] })
+      .send({ donacion_ids: [aqui.donacionId] })
       .expect(409);
     expect(ajena.body.type).toBe('asignacion-invalida');
+    // Tampoco puede aceptar una oferta que no es suya.
+    await ctx
+      .como(otro)
+      .post(`/v1/asignaciones/${pesada.ofertaId}/aceptar`)
+      .expect(404);
+
+    await ctx
+      .como(pesada.donante)
+      .post(`/v1/donaciones/${pesada.id}/cancelar`)
+      .send({
+        motivo_id: cat.motivo('CANCELACION_DONACION', 'CAMBIO_DE_PLANES'),
+      })
+      .expect(200);
   });
 
-  it('una recogida fallida (donante ausente) abre una incidencia y la ruta continúa', async () => {
-    const donacion = await asignada({
-      lat: ZONA.lat + 0.003,
-      lng: ZONA.lng - 0.003,
+  it('la flota del banco agrupa con POST /v1/rutas: dispersión y ruta sin iniciar', async () => {
+    const aqui = await publicada({
+      lat: ZONA.lat + 0.001,
+      lng: ZONA.lng + 0.001,
     });
-    const ruta = await ctx
-      .como(voluntario)
+    const alla = await publicada({
+      lat: ZONA.lat + 0.08,
+      lng: ZONA.lng + 0.001,
+    });
+    const dispersas = await ctx
+      .como(asesor)
       .post('/v1/rutas')
-      .send({ donacion_ids: [donacion] })
-      .expect(201);
-    const [recogida, entrega] = ruta.body.paradas;
+      .send({ donacion_ids: [aqui.id, alla.id], origen: ZONA })
+      .expect(422);
+    expect(dispersas.body.type).toBe('donaciones-dispersas');
 
+    const flota = await ctx
+      .como(asesor)
+      .post('/v1/rutas')
+      .send({ donacion_ids: [aqui.id], origen: ZONA })
+      .expect(201);
+    expect(flota.body.estado).toBe('PLANIFICADA');
     const antes = await ctx
-      .como(voluntario)
-      .post(`/v1/paradas/${recogida.id}/fallida`)
+      .como(asesor)
+      .post(`/v1/paradas/${flota.body.paradas[0].id}/fallida`)
       .send({
         tipo_incidencia_id: cat.tipoIncidencia('DONANTE_AUSENTE'),
         descripcion: 'Nadie abrió en 20 minutos',
@@ -166,10 +220,29 @@ describe('Ruteo', () => {
       .expect(409);
     expect(antes.body.type).toBe('ruta-no-en-curso');
 
+    // Sin iniciar, el personal la cancela y la donación vuelve a publicarse.
     await ctx
-      .como(voluntario)
-      .post(`/v1/rutas/${ruta.body.id}/iniciar`)
+      .como(asesor)
+      .post(`/v1/rutas/${flota.body.id}/cancelar`)
       .expect(200);
+    for (const d of [aqui, alla]) {
+      await ctx
+        .como(d.donante)
+        .post(`/v1/donaciones/${d.id}/cancelar`)
+        .send({
+          motivo_id: cat.motivo('CANCELACION_DONACION', 'CAMBIO_DE_PLANES'),
+        })
+        .expect(200);
+    }
+  });
+
+  it('una recogida fallida (donante ausente) abre una incidencia y la ruta continúa', async () => {
+    const { donacionId: donacion, rutaId } = await asignada({
+      lat: ZONA.lat + 0.003,
+      lng: ZONA.lng - 0.003,
+    });
+    const [recogida, entrega] = (await ruta(rutaId)).paradas;
+
     const r = await ctx
       .como(voluntario)
       .post(`/v1/paradas/${recogida.id}/fallida`)
@@ -225,28 +298,15 @@ describe('Ruteo', () => {
         confirmada_en_dispositivo: new Date().toISOString(),
       })
       .expect(200);
-    const final = await ctx
-      .como(voluntario)
-      .get(`/v1/rutas/${ruta.body.id}`)
-      .expect(200);
-    expect(final.body.estado).toBe('COMPLETADA');
+    expect((await ruta(rutaId)).estado).toBe('COMPLETADA');
   });
 
   it('la recogida registra el estado del producto; la entrega lo rechaza (API-10)', async () => {
-    const donacion = await asignada({
+    const { rutaId } = await asignada({
       lat: ZONA.lat + 0.002,
       lng: ZONA.lng + 0.002,
     });
-    const ruta = await ctx
-      .como(voluntario)
-      .post('/v1/rutas')
-      .send({ donacion_ids: [donacion] })
-      .expect(201);
-    const [recogida, entrega] = ruta.body.paradas;
-    await ctx
-      .como(voluntario)
-      .post(`/v1/rutas/${ruta.body.id}/iniciar`)
-      .expect(200);
+    const [recogida, entrega] = (await ruta(rutaId)).paradas;
 
     const evidencia = async (id: string, tipo: string, paradaId: string) =>
       ctx
@@ -309,27 +369,20 @@ describe('Ruteo', () => {
     );
     // null means "not recorded" and is accepted on a delivery.
     await confirmar(entrega.id, { estado_producto: null }).expect(200);
-    const detalle = await ctx
-      .como(voluntario)
-      .get(`/v1/rutas/${ruta.body.id}`)
-      .expect(200);
-    expect(detalle.body.paradas[0]).toMatchObject({
+    const detalle = await ruta(rutaId);
+    expect(detalle.paradas[0]).toMatchObject({
       id: recogida.id,
       estado_producto: 'REGULAR',
     });
-    expect(detalle.body.paradas[1].estado_producto).toBeNull();
+    expect(detalle.paradas[1].estado_producto).toBeNull();
   });
 
   it('las evidencias solo se registran sobre paradas propias y con rutas de archivo propias', async () => {
-    const donacion = await asignada({
+    const { rutaId } = await asignada({
       lat: ZONA.lat - 0.002,
       lng: ZONA.lng + 0.002,
     });
-    const ruta = await ctx
-      .como(voluntario)
-      .post('/v1/rutas')
-      .send({ donacion_ids: [donacion] })
-      .expect(201);
+    const [recogida] = (await ruta(rutaId)).paradas;
     const intruso = await ctx.cuenta();
     const ajena = await ctx
       .como(intruso)
@@ -338,7 +391,7 @@ describe('Ruteo', () => {
         id: 'c1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e',
         tipo: 'RECOGIDA',
         ruta: await ctx.ruta(intruso, 'EVIDENCIA'),
-        parada_id: ruta.body.paradas[0].id,
+        parada_id: recogida.id,
         capturada_at: new Date().toISOString(),
       })
       .expect(403);
@@ -351,14 +404,10 @@ describe('Ruteo', () => {
         id: 'd1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e',
         tipo: 'RECOGIDA',
         ruta: await ctx.ruta(intruso, 'EVIDENCIA'),
-        parada_id: ruta.body.paradas[0].id,
+        parada_id: recogida.id,
         capturada_at: new Date().toISOString(),
       })
       .expect(422);
     expect(rutaAjena.body.type).toBe('archivo-invalido');
-    await ctx
-      .como(voluntario)
-      .post(`/v1/rutas/${ruta.body.id}/cancelar`)
-      .expect(200);
   });
 });
