@@ -5,7 +5,11 @@ import { EvidenciasModule } from '../evidencias/evidencias.module';
 import { IdentidadModule } from '../identidad/identidad.module';
 import { IncidenciasModule } from '../incidencias/incidencias.module';
 import { NotificacionesModule } from '../notificaciones/notificaciones.module';
-import { ParadasController, RutasController } from './ruteo.controller';
+import {
+  ParadasController,
+  RutasController,
+  SeguimientoDonacionController,
+} from './ruteo.controller';
 import { RuteoService } from './ruteo.service';
 import { SeguimientoService } from './seguimiento.service';
 
@@ -18,7 +22,7 @@ import { SeguimientoService } from './seguimiento.service';
     IncidenciasModule,
     NotificacionesModule,
   ],
-  controllers: [RutasController, ParadasController],
+  controllers: [RutasController, ParadasController, SeguimientoDonacionController],
   providers: [RuteoService, SeguimientoService],
   exports: [RuteoService],
 })
