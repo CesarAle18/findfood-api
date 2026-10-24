@@ -27,6 +27,15 @@ export class CorreoService {
         email,
         name: config.get('BREVO_SENDER_NAME') ?? 'FindFood',
       };
+      this.logger.log(
+        { remitente: email, nombre: this.remitente.name },
+        'Correo por Brevo habilitado',
+      );
+    } else {
+      this.logger.warn(
+        { falta: apiKey ? 'BREVO_SENDER_EMAIL' : 'BREVO_API_KEY' },
+        'Brevo no configurado: la contraseña temporal se devuelve al administrador',
+      );
     }
   }
 
@@ -44,8 +53,16 @@ export class CorreoService {
     texto: string,
     html?: string,
   ): Promise<boolean> {
-    if (!this.apiKey || !this.remitente) return false;
+    if (!this.apiKey || !this.remitente) {
+      this.logger.warn(
+        { para, asunto },
+        'Correo no enviado: Brevo no configurado',
+      );
+      return false;
+    }
 
+    this.logger.log({ para, asunto }, 'Enviando correo por Brevo');
+    const inicio = Date.now();
     const control = new AbortController();
     const temporizador = setTimeout(() => control.abort(), TIEMPO_LIMITE_MS);
 
@@ -67,21 +84,47 @@ export class CorreoService {
         signal: control.signal,
       });
 
+      const detalle = await respuesta.text().catch(() => '');
+      const duracionMs = Date.now() - inicio;
       if (!respuesta.ok) {
-        const detalle = await respuesta.text().catch(() => '');
         this.logger.error(
-          { estado: respuesta.status, detalle, para },
+          { estado: respuesta.status, detalle, para, duracionMs },
           'Brevo rechazó el envío',
         );
         return false;
       }
+      this.logger.log(
+        { para, messageId: idMensaje(detalle), duracionMs },
+        'Brevo aceptó el correo',
+      );
       return true;
     } catch (err) {
-      this.logger.error({ err, para }, 'No se pudo enviar el correo');
+      const duracionMs = Date.now() - inicio;
+      if (control.signal.aborted) {
+        this.logger.error(
+          { para, duracionMs },
+          `Brevo no respondió en ${TIEMPO_LIMITE_MS / 1000} s`,
+        );
+      } else {
+        this.logger.error(
+          { err, para, duracionMs },
+          'No se pudo enviar el correo',
+        );
+      }
       return false;
     } finally {
       clearTimeout(temporizador);
     }
+  }
+}
+
+/** `messageId` de la respuesta de Brevo, para buscar el envío en sus logs. */
+function idMensaje(cuerpo: string): string | undefined {
+  try {
+    const { messageId } = JSON.parse(cuerpo) as { messageId?: string };
+    return messageId;
+  } catch {
+    return undefined;
   }
 }
 
