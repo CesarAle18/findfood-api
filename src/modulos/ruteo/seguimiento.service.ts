@@ -10,8 +10,9 @@ import { GoogleRoutesService } from '../../comun/google/google-routes.service';
 import { noEncontrado } from '../../comun/http/problema';
 import { PrismaService } from '../../comun/prisma/prisma.service';
 import { minutosEntre } from '../../comun/tiempo';
+import { Prisma } from '../../generated/prisma/client';
 import type { SeguimientoDto } from './ruteo.dto';
-import { type FaseSeguimiento, ventanaDonante } from './seguimiento-donacion';
+import { type FaseSeguimiento, PARADA_ABIERTA, ventanaDonante } from './seguimiento-donacion';
 
 /** Una ultima_ubicacion más vieja que esto no sirve como posición actual. */
 const UBICACION_RECIENTE_MIN = 30;
@@ -48,7 +49,10 @@ export interface SeguimientoDonacion {
   estado_donacion: string;
   activo: boolean;
   fase: FaseSeguimiento | null;
-  /** Solo dentro de la ventana: es el canal Realtime ruta:<id> que puede escuchar. */
+  /**
+   * Solo dentro de la ventana y con la posición visible: es el canal Realtime ruta:<id>
+   * que puede escuchar. Camino al banco es null mientras queden recogidas de otros donantes.
+   */
   ruta_id: string | null;
   /** Paradas abiertas antes del destino del donante. Nunca se dice cuáles. */
   paradas_antes: number;
@@ -76,6 +80,7 @@ interface FilaSeguimientoDonacion extends UltimaUbicacion {
   entrega_destino_lat: number | null;
   entrega_destino_lng: number | null;
   antes_entrega: number;
+  otras_recogidas: number;
   almacen_id: string | null;
   almacen_nombre: string | null;
   almacen_direccion: string | null;
@@ -189,6 +194,10 @@ export class SeguimientoService {
    * destino, nunca su dirección, id ni coordenadas. Por eso el tramo se calcula solo si
    * el destino es la siguiente parada: el camino a otra pasaría por casas ajenas.
    *
+   * Camino al banco tampoco se informa dónde va el voluntario (ni ruta_id, ni posición,
+   * ni tramo) mientras le queden recogidas de otros donantes: estando en una de ellas su
+   * posición revelaría esa dirección. El donante ve la fase y cuántas paradas faltan.
+   *
    * No recibe la posición en la consulta: la caché del tramo es una por ruta y la
    * comparten el voluntario y el panel, y un donante no debe poder alterarla. El origen
    * es la ultima_ubicacion reciente del voluntario.
@@ -198,7 +207,10 @@ export class SeguimientoService {
     donacionId: string,
   ): Promise<SeguimientoDonacion> {
     // La recogida de la donación en su ruta (EN_CURSO primero, luego la más reciente), la
-    // ENTREGA de esa ruta con su sede y la ultima_ubicacion del voluntario.
+    // ENTREGA de mayor orden de esa ruta con su sede (la misma que mira
+    // fn_rt_es_donante_de_ruta) y la ultima_ubicacion del voluntario. Los estados abiertos
+    // van como parámetros (PARADA_ABIERTA) y se comparan con el enum leído como texto.
+    const abiertas = Prisma.join(PARADA_ABIERTA);
     const [f] = await this.prisma.$queryRaw<FilaSeguimientoDonacion[]>`
       SELECT d.estado::text AS estado_donacion, dn.usuario_id AS donante_usuario_id,
              d.direccion_recogida AS direccion,
@@ -210,13 +222,16 @@ export class SeguimientoService {
              ST_X(rec.ubicacion::geometry) AS recogida_destino_lng,
              (SELECT count(*)::int FROM parada_ruta o
                WHERE o.ruta_id = r.id AND o.orden < rec.orden
-                 AND o.estado IN ('PENDIENTE','EN_SITIO')) AS antes_recogida,
+                 AND o.estado::text IN (${abiertas})) AS antes_recogida,
              ent.id AS entrega_id, ent.estado::text AS entrega_estado,
              ST_Y(ent.ubicacion::geometry) AS entrega_destino_lat,
              ST_X(ent.ubicacion::geometry) AS entrega_destino_lng,
              (SELECT count(*)::int FROM parada_ruta o
                WHERE o.ruta_id = r.id AND o.orden < ent.orden
-                 AND o.estado IN ('PENDIENTE','EN_SITIO')) AS antes_entrega,
+                 AND o.estado::text IN (${abiertas})) AS antes_entrega,
+             (SELECT count(*)::int FROM parada_ruta o
+               WHERE o.ruta_id = r.id AND o.tipo = 'RECOGIDA' AND o.id <> rec.id
+                 AND o.estado::text IN (${abiertas})) AS otras_recogidas,
              a.id AS almacen_id, a.nombre AS almacen_nombre, a.direccion AS almacen_direccion,
              ST_Y(a.ubicacion::geometry) AS almacen_lat, ST_X(a.ubicacion::geometry) AS almacen_lng,
              ST_Y(v.ultima_ubicacion::geometry) AS lat, ST_X(v.ultima_ubicacion::geometry) AS lng,
@@ -243,11 +258,12 @@ export class SeguimientoService {
       throw noEncontrado('Donación');
     }
 
-    const { activo, fase } = ventanaDonante({
+    const { activo, fase, posicion_visible } = ventanaDonante({
       ruta_estado: f.ruta_estado,
       recogida_estado: f.recogida_estado,
       entrega_estado: f.entrega_estado,
       donacion_estado: f.estado_donacion,
+      otras_recogidas_abiertas: f.otras_recogidas,
     });
     const respuesta: SeguimientoDonacion = {
       donacion_id: donacionId,
@@ -270,13 +286,14 @@ export class SeguimientoService {
       tramo: null,
     };
     if (!activo || !fase) return respuesta;
+    const paradasAntes = fase === 'HACIA_RECOGIDA' ? f.antes_recogida : f.antes_entrega;
+    if (!posicion_visible) return { ...respuesta, activo, fase, paradas_antes: paradasAntes };
 
     // Dentro de la ventana la ruta, la recogida y la entrega existen.
     const destino =
       fase === 'HACIA_RECOGIDA'
         ? { id: f.recogida_id!, lat: f.recogida_destino_lat!, lng: f.recogida_destino_lng! }
         : { id: f.entrega_id!, lat: f.entrega_destino_lat!, lng: f.entrega_destino_lng! };
-    const paradasAntes = fase === 'HACIA_RECOGIDA' ? f.antes_recogida : f.antes_entrega;
     const reciente = posicionReciente(f);
     const tramo =
       reciente && paradasAntes === 0

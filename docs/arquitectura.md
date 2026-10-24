@@ -481,18 +481,20 @@ Un disparador sobre `donacion` (DDL v3, §19.1) emite un mensaje *broadcast* al 
 ### 9.2 Ubicación del voluntario en tiempo real (objetivo general del anteproyecto)
 
 - Durante una ruta, la app del voluntario emite su posición por *broadcast* en el tópico `ruta:<id>` cada pocos segundos. **Estas posiciones no se guardan en la base de datos.**
-- Pueden escuchar el canal el personal y el donante. El donante **solo** mientras su donación va en camino (`fn_rt_es_donante_de_ruta`, migración `20261023000000_seguimiento_donante.sql`):
+- Pueden escuchar el canal el personal y el donante. El donante **solo** mientras su donación va en camino (`fn_rt_es_donante_de_ruta`, migraciones `20261023000000_seguimiento_donante.sql` y `20261023000001_seguimiento_donante_privacidad.sql`):
   - la ruta está EN_CURSO;
   - la recogida de su donación está PENDIENTE, EN_SITIO o COMPLETADA (no FALLIDA ni OMITIDA);
   - la donación está ASIGNADA, EN_RECOLECCION o EN_TRANSITO;
-  - la ENTREGA de la ruta sigue PENDIENTE o EN_SITIO.
+  - la ENTREGA de mayor `orden` de la ruta (la llegada al banco) sigue PENDIENTE o EN_SITIO;
+  - si su recogida ya está COMPLETADA, ninguna otra RECOGIDA de la ruta sigue PENDIENTE o EN_SITIO.
 
-  Así ve los dos tramos: el voluntario llegando a su punto y luego camino al banco. Confirmar la entrega cierra la ventana. Es el principio de finalidad de la Ley 1581: el donante sigue **su donación** hasta que llega al banco, no al voluntario después.
+  Así ve los dos tramos: el voluntario llegando a su punto y luego camino al banco. Confirmar la entrega cierra la ventana. Es el principio de finalidad de la Ley 1581: el donante sigue **su donación** hasta que llega al banco, no al voluntario después. La última condición protege a los demás donantes: camino al banco el voluntario puede pasar antes por otras recogidas, y su posición estando en una de ellas revelaría esa dirección. Mientras queden recogidas abiertas el donante no ve la posición; cuando terminan, la vuelve a ver hasta la entrega.
 - `GET /v1/donaciones/{id}/seguimiento` aplica la misma regla (`ventanaDonante()` en `ruteo/seguimiento-donacion.ts`) y es la consulta de respaldo del donante: fase (`HACIA_RECOGIDA` o `HACIA_BANCO`), su punto, el banco, la `ultima_ubicacion` reciente del voluntario y la llegada estimada.
   - De las otras paradas de la ruta solo devuelve cuántas hay antes de su destino (`paradas_antes`), nunca su dirección, id ni coordenadas. Por eso el tramo solo se calcula cuando el destino es la siguiente parada.
+  - Camino al banco con otras recogidas abiertas responde `activo: true` y `fase: HACIA_BANCO` con `paradas_antes`, pero `ruta_id`, `voluntario_posicion` y `tramo` en `null` (el mismo corte que Realtime). La app muestra cuántas paradas faltan y cierra el canal mientras `ruta_id` sea `null`.
   - No recibe `?lat&lng`: la caché del tramo (Google cada 2 min como máximo) es una por ruta y la comparten el voluntario y el panel.
   - Fuera de la ventana responde `activo: false` y `ruta_id: null`.
-- **Realtime autoriza al unirse al canal y al refrescar el token**, no en cada mensaje. Cuando el endpoint responde `activo: false`, la app cierra el canal; un cliente que no lo haga deja de recibir posiciones en el siguiente refresco del token.
+- **Realtime autoriza al unirse al canal y al refrescar el token**, no en cada mensaje. Cuando el endpoint responde `ruta_id: null` (fuera de la ventana o con la posición oculta), la app cierra el canal; un cliente que no lo haga deja de recibir posiciones en el siguiente refresco del token.
 - Solo el voluntario de la ruta puede emitir.
 - Cada pocos minutos la app llama a `POST /v1/voluntario/ubicacion` y se guarda una muestra en `voluntario.ultima_ubicacion`, útil para soporte e incidencias.
 

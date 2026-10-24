@@ -297,6 +297,11 @@ describe('Trazado y seguimiento de rutas', () => {
     const seguimiento = (cuenta: Cuenta, donacion: string) =>
       ctx.como(cuenta).get(`/v1/donaciones/${donacion}/seguimiento`);
 
+    /** Realtime deja escuchar ruta:<id> exactamente cuando el endpoint entrega ruta_id. */
+    async function mismaVentana(cuenta: Cuenta, body: { ruta_id: string | null }) {
+      expect(await realtimeDeja(cuenta)).toBe(body.ruta_id !== null);
+    }
+
     beforeAll(async () => {
       sedesD = await prepararBanco(ctx, admin, ZONA_D);
       volD = await ctx.voluntario(admin, cercaD(0.001));
@@ -327,6 +332,7 @@ describe('Trazado y seguimiento de rutas', () => {
       expect(recogida.lat).toBeCloseTo(cercaD(0.01).lat, 6);
       expect(tramo.proveedor).toBe('ESTIMADO');
       expect(tramo.trayecto.coordinates.at(-1)).toEqual([recogida.lng, recogida.lat]);
+      await mismaVentana(donanteA, r.body);
       expect(await realtimeDeja(donanteA)).toBe(true);
       expect(await realtimeDeja(donanteB)).toBe(false);
     });
@@ -356,38 +362,68 @@ describe('Trazado y seguimiento de rutas', () => {
       });
       const { banco, tramo } = r.body;
       expect(tramo.trayecto.coordinates.at(-1)).toEqual([banco.lng, banco.lat]);
+      await mismaVentana(donanteA, r.body);
       expect(await realtimeDeja(donanteA)).toBe(true);
     });
 
-    it('con otra recogida antes del banco: solo un conteo, sin tramo ni datos ajenos', async () => {
+    it('con otra recogida antes del banco: solo un conteo, sin posición, tramo ni datos ajenos', async () => {
       ({ donacion: donacionB } = await publicar(donanteB, cercaD(0.005), DIRECCION_AJENA));
       const ajena = (await paradas()).find((p) => p.donacion_id === donacionB)!;
+
+      // La posición del voluntario en casa de B revelaría su dirección: A no la ve.
+      const r = await seguimiento(donanteA, donacionA).expect(200);
+      expect(r.body).toMatchObject({
+        activo: true,
+        fase: 'HACIA_BANCO',
+        ruta_id: null,
+        voluntario_posicion: null,
+        tramo: null,
+      });
+      expect(r.body.paradas_antes).toBeGreaterThanOrEqual(1);
+      const texto = JSON.stringify(r.body);
+      expect(texto).not.toContain(DIRECCION_AJENA);
+      expect(texto).not.toContain(donacionB);
+      expect(texto).not.toContain(ajena.id);
+      expect(texto).not.toContain(rutaD);
+      await mismaVentana(donanteA, r.body);
+      expect(await realtimeDeja(donanteA)).toBe(false);
+
+      // El donante B va primero: él sí ve al voluntario y el tramo hacia su punto.
+      const b = await seguimiento(donanteB, donacionB).expect(200);
+      expect(b.body).toMatchObject({
+        fase: 'HACIA_RECOGIDA',
+        ruta_id: rutaD,
+        paradas_antes: 0,
+        voluntario_posicion: { fuente: 'ULTIMA_UBICACION' },
+      });
+      expect(b.body.tramo).not.toBeNull();
+      await mismaVentana(donanteB, b.body);
+      expect(await realtimeDeja(donanteB)).toBe(true);
+    });
+
+    it('al recoger la otra donación vuelven la posición y el canal camino al banco', async () => {
+      await confirmar((await paradas()).find((p) => p.donacion_id === donacionB)!.id, 'RECOGIDA');
 
       const r = await seguimiento(donanteA, donacionA).expect(200);
       expect(r.body).toMatchObject({
         activo: true,
         fase: 'HACIA_BANCO',
-        paradas_antes: 1,
-        tramo: null,
+        ruta_id: rutaD,
+        paradas_antes: 0,
         voluntario_posicion: { fuente: 'ULTIMA_UBICACION' },
       });
-      const texto = JSON.stringify(r.body);
-      expect(texto).not.toContain(DIRECCION_AJENA);
-      expect(texto).not.toContain(donacionB);
-      expect(texto).not.toContain(ajena.id);
-
-      // El donante B va primero: él sí ve el tramo hacia su punto.
-      const b = await seguimiento(donanteB, donacionB).expect(200);
-      expect(b.body).toMatchObject({ fase: 'HACIA_RECOGIDA', paradas_antes: 0 });
-      expect(b.body.tramo).not.toBeNull();
+      const { banco, tramo } = r.body;
+      expect(tramo.trayecto.coordinates.at(-1)).toEqual([banco.lng, banco.lat]);
+      await mismaVentana(donanteA, r.body);
       expect(await realtimeDeja(donanteA)).toBe(true);
-      expect(await realtimeDeja(donanteB)).toBe(true);
+
+      const b = await seguimiento(donanteB, donacionB).expect(200);
+      expect(b.body).toMatchObject({ fase: 'HACIA_BANCO', ruta_id: rutaD, paradas_antes: 0 });
+      await mismaVentana(donanteB, b.body);
     });
 
     it('tras la entrega en el banco se cierra la ventana (API y Realtime)', async () => {
-      const todas = await paradas();
-      await confirmar(todas.find((p) => p.donacion_id === donacionB)!.id, 'RECOGIDA');
-      await confirmar(todas.find((p) => p.tipo === 'ENTREGA')!.id, 'ENTREGA');
+      await confirmar((await paradas()).find((p) => p.tipo === 'ENTREGA')!.id, 'ENTREGA');
 
       const r = await seguimiento(donanteA, donacionA).expect(200);
       expect(r.body).toMatchObject({
@@ -401,6 +437,10 @@ describe('Trazado y seguimiento de rutas', () => {
         recogida: { direccion: 'Calle 5 # 6-7' },
         banco: { id: sedesD.seco },
       });
+      await mismaVentana(donanteA, r.body);
+      const b = await seguimiento(donanteB, donacionB).expect(200);
+      expect(b.body).toMatchObject({ activo: false, ruta_id: null });
+      await mismaVentana(donanteB, b.body);
       expect(await realtimeDeja(donanteA)).toBe(false);
       expect(await realtimeDeja(donanteB)).toBe(false);
     });
