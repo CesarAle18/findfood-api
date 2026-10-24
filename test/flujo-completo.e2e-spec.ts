@@ -181,11 +181,18 @@ describe('Flujo completo de una donación', () => {
     expect(repetida.body.type).toBe('no-encontrado');
   });
 
-  it('aceptar asigna la donación y el donante ve al voluntario', async () => {
-    await ctx
+  it('aceptar incorpora la donación a una ruta EN_CURSO y el donante ve al voluntario', async () => {
+    // Rutas dinámicas: aceptar crea la ruta del voluntario y deja la donación en recolección.
+    const r = await ctx
       .como(lejano)
       .post(`/v1/asignaciones/${ofertaId}/aceptar`)
       .expect(200);
+    expect(r.body).toMatchObject({
+      id: ofertaId,
+      estado: 'ACEPTADA',
+      ruta: { estado: 'EN_CURSO', actualizada: true },
+    });
+    rutaId = r.body.ruta.id;
     const otra = await ctx
       .como(lejano)
       .post(`/v1/asignaciones/${ofertaId}/aceptar`)
@@ -196,7 +203,7 @@ describe('Flujo completo de una donación', () => {
       .como(donante)
       .get(`/v1/donaciones/${donacionId}`)
       .expect(200);
-    expect(d.body.estado).toBe('ASIGNADA');
+    expect(d.body.estado).toBe('EN_RECOLECCION');
     expect(d.body.asignacion.voluntario.telefono).toBe('+573001112233');
 
     const oferta = await ctx
@@ -207,37 +214,32 @@ describe('Flujo completo de una donación', () => {
     expect(aceptada.contacto_telefono).toBe('+573001112233');
   });
 
-  it('el voluntario arma la ruta: una recogida y la entrega en la sede', async () => {
+  it('la ruta creada al aceptar tiene una recogida y la entrega en la sede', async () => {
     const r = await ctx
       .como(voluntarioAsignado)
-      .post('/v1/rutas')
-      .send({ donacion_ids: [donacionId] })
-      .expect(201);
-    rutaId = r.body.id;
-    expect(r.body.estado).toBe('PLANIFICADA');
+      .get(`/v1/rutas/${rutaId}`)
+      .expect(200);
+    expect(r.body.estado).toBe('EN_CURSO');
     expect(r.body.paradas.map((p: { tipo: string }) => p.tipo)).toEqual([
       'RECOGIDA',
       'ENTREGA',
     ]);
-    expect(r.body.geometria.type).toBe('LineString');
-    expect(r.body.proveedor_ruteo).toBeNull(); // sin llave de Google: fallback geodésico
+    expect(r.body.paradas[0].donacion_id).toBe(donacionId);
+    expect(r.body.paradas[1].almacen_id).toBe(sedes.seco);
+    // Sin llave de Google no hay trazado por calles: el panel une las paradas en línea recta.
+    expect(r.body.geometria).toBeNull();
+    expect(r.body.proveedor_ruteo).toBeNull();
     recogidaId = r.body.paradas[0].id;
     entregaId = r.body.paradas[1].id;
 
     // Otra persona no ve la ruta.
     await ctx.como(cercano).get(`/v1/rutas/${rutaId}`).expect(404);
-  });
 
-  it('iniciar la ruta pasa la donación a EN_RECOLECCION', async () => {
+    // La ruta ya está en curso: iniciarla de nuevo es un no-op.
     await ctx
       .como(voluntarioAsignado)
       .post(`/v1/rutas/${rutaId}/iniciar`)
       .expect(200);
-    const d = await ctx
-      .como(donante)
-      .get(`/v1/donaciones/${donacionId}`)
-      .expect(200);
-    expect(d.body.estado).toBe('EN_RECOLECCION');
     await ctx
       .como(voluntarioAsignado)
       .post(`/v1/paradas/${recogidaId}/llegada`)
@@ -400,6 +402,7 @@ describe('Flujo completo de una donación', () => {
     const estados = r.body
       .filter((h: { ambito: string }) => h.ambito === 'DONACION')
       .map((h: { estado_nuevo: string }) => h.estado_nuevo);
+    // ASIGNADA y EN_RECOLECCION se registran en la misma transacción de la aceptación.
     expect(estados).toEqual([
       'BORRADOR',
       'PUBLICADA',
