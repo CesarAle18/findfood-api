@@ -27,15 +27,25 @@ export class AutocompletarDto extends SesionGeoDto {
   @MaxLength(200)
   q: string;
 
+  /**
+   * Obsoletos: antes sesgaban la búsqueda hacia este punto. Ahora siempre se
+   * busca dentro de la zona de servicio; se aceptan e ignoran para que los
+   * clientes que aún los envían no reciban 400.
+   */
   @ApiPropertyOptional({
-    description: 'Sesga los resultados hacia este punto (por omisión, el banco)',
+    deprecated: true,
+    description:
+      'Obsoleto, se ignora: la búsqueda se limita a Bogotá y municipios vecinos',
   })
   @IsOptional()
   @Type(() => Number)
   @IsLatitude()
   lat?: number;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    deprecated: true,
+    description: 'Obsoleto, se ignora (ver lat)',
+  })
   @IsOptional()
   @Type(() => Number)
   @IsLongitude()

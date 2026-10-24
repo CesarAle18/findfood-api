@@ -292,7 +292,7 @@ La app y el panel buscan direcciones a través de la API (`GeoService` + `Google
 
 - **No toca los filtros duros.** Los endpoints son de solo lectura. El punto que se guarda en `ubicacion_recogida`, `ubicacion_base` o `almacen.ubicacion` sigue llegando como `CoordenadaDto` por los endpoints de cada dominio, y es el pin que confirma el usuario.
 - **La calidad del punto sí los afecta.** Un centroide de barrio puede dejar el punto a kilómetros del sitio real y cambiar quién pasa el `ST_DWithin` de §6.2. Por eso `precision` (el `location_type` de Google) viaja al cliente, que pide ajustar el pin si es `GEOMETRIC_CENTER` o `APPROXIMATE`.
-- **Sesgo y región:** `includedRegionCodes: ['co']` / `components=country:CO`, con un sesgo de 50 km alrededor de `banco_alimentos.ubicacion`.
+- **Zona de servicio:** Bogotá y municipios vecinos, rectángulo aproximado `ZONA_SERVICIO` (sur 4.44, norte 5.00, oeste -74.30, este -73.95) en `src/comun/geo.ts`, con los mismos números en la app. Autocomplete usa `locationRestriction.rectangle` además de `includedRegionCodes: ['co']`; Geocoding envía `components=country:CO` y `bounds`, y descarta los resultados fuera de la zona; Place Details fuera de la zona y la inversa de un punto fuera de ella responden 404 sin llamar a Google. `ubicacion_recogida` y `ubicacion_base` fuera de la zona responden 400. Los parámetros `lat`/`lng` de `/geo/autocompletar` son obsoletos y se ignoran.
 - **Sin Google:** 503 `geo-no-disponible`. La app recurre al geocoder del teléfono y el panel a ubicar el pin a mano.
 - **Tope:** 60 consultas por usuario y minuto, en memoria (la API corre como un solo proceso), con 429 `demasiadas-solicitudes`.
 - `ultima_ubicacion` y las muestras del rastreo **no** se geocodifican (§9.2).

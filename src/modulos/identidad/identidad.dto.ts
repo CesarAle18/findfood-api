@@ -18,7 +18,7 @@ import {
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
-import { CoordenadaDto } from '../../comun/geo';
+import { CoordenadaDto, DentroDeZonaServicio } from '../../comun/geo';
 import { EsTelefono } from '../../comun/validacion';
 import { plataforma_dispositivo } from '../../generated/prisma/enums';
 
@@ -128,10 +128,12 @@ export class SolicitudVoluntarioDto {
 
   @ApiProperty({
     type: CoordenadaDto,
-    description: 'Punto desde el que suele salir',
+    description:
+      'Punto desde el que suele salir; debe estar en Bogotá o un municipio vecino',
   })
   @ValidateNested()
   @Type(() => CoordenadaDto)
+  @DentroDeZonaServicio()
   ubicacion_base: CoordenadaDto;
 
   @ApiPropertyOptional({ default: 10 })

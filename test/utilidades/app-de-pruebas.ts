@@ -118,12 +118,12 @@ export class PushFalso extends ProveedorPush {
 export class LugaresFalso {
   disponible = false;
   sugerencias: Sugerencia[] | null = [];
-  lugar: Lugar | null = null;
+  lugar: Lugar | null | undefined = null;
   geocodificacion: Geocodificacion | null | undefined = undefined;
   llamadas: { metodo: string; args: unknown[] }[] = [];
 
-  async autocompletar(texto: string, sesion: string, cerca: Coordenada) {
-    this.llamadas.push({ metodo: 'autocompletar', args: [texto, sesion, cerca] });
+  async autocompletar(texto: string, sesion: string) {
+    this.llamadas.push({ metodo: 'autocompletar', args: [texto, sesion] });
     return this.disponible ? this.sugerencias : null;
   }
 

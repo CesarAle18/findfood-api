@@ -17,7 +17,7 @@ import {
   MinLength,
   ValidateNested,
 } from 'class-validator';
-import { CoordenadaDto } from '../../comun/geo';
+import { CoordenadaDto, DentroDeZonaServicio } from '../../comun/geo';
 import { EsTelefono, PaginacionDto } from '../../comun/validacion';
 import { estado_donacion } from '../../generated/prisma/enums';
 
@@ -111,9 +111,13 @@ export class CrearDonacionDto {
   @MaxLength(500)
   referencia_recogida?: string;
 
-  @ApiProperty({ type: CoordenadaDto })
+  @ApiProperty({
+    type: CoordenadaDto,
+    description: 'Debe estar en Bogotá o un municipio vecino',
+  })
   @ValidateNested()
   @Type(() => CoordenadaDto)
+  @DentroDeZonaServicio()
   ubicacion_recogida: CoordenadaDto;
 
   @ApiPropertyOptional({

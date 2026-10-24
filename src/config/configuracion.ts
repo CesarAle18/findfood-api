@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { z } from 'zod';
+import { parsearZonaServicio } from '../comun/geo';
 
 const booleano = z
   .enum(['true', 'false', '1', '0'])
@@ -26,6 +27,15 @@ const esquema = z
     SUPABASE_JWT_SECRET: z.string().min(16).optional(),
 
     GOOGLE_MAPS_API_KEY: z.string().min(1).optional(),
+    // Zona de servicio `sur,oeste,norte,este`; por omisión, Bogotá y municipios
+    // vecinos (geo.ts). Se lee de process.env donde no hay inyección.
+    ZONA_SERVICIO: z
+      .string()
+      .refine((v) => parsearZonaServicio(v) !== null, {
+        message:
+          'debe ser "sur,oeste,norte,este": cuatro números con sur < norte y oeste < este',
+      })
+      .optional(),
     EXPO_ACCESS_TOKEN: z.string().min(1).optional(),
 
     // Correo de la contraseña temporal de los asesores, por la API HTTP de
