@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigApp } from '../../config/configuracion';
-import type { Coordenada } from '../geo';
+import { type Coordenada, dentroDeZonaServicio, zonaServicio } from '../geo';
 import { errorGoogle } from './error-google';
 
 export interface Sugerencia {
@@ -36,14 +36,12 @@ const URL_AUTOCOMPLETAR = 'https://places.googleapis.com/v1/places:autocomplete'
 const URL_LUGAR = 'https://places.googleapis.com/v1/places/';
 const URL_GEOCODIFICAR = 'https://maps.googleapis.com/maps/api/geocode/json';
 
-/** Radio del sesgo de búsqueda alrededor del banco: Bogotá y municipios vecinos. */
-const RADIO_SESGO_M = 50_000;
-
 /**
  * Cliente de Places API (New) y Geocoding API para buscar direcciones. Mismo
  * contrato que GoogleRoutesService: nunca lanza, ante cualquier falla devuelve
  * null y quien llama decide el respaldo. No persiste nada: el punto que se
- * guarda es siempre el pin que confirma el usuario.
+ * guarda es siempre el pin que confirma el usuario. Solo busca dentro de la
+ * zona de servicio (Bogotá y municipios vecinos): lo de afuera no existe.
  */
 @Injectable()
 export class GoogleLugaresService {
@@ -58,14 +56,14 @@ export class GoogleLugaresService {
     return Boolean(this.llave);
   }
 
-  /** Sugerencias en Colombia, sesgadas hacia `cerca`. `null` si Google no responde. */
+  /** Sugerencias dentro de la zona de servicio. `null` si Google no responde. */
   async autocompletar(
     texto: string,
     sesion: string,
-    cerca: Coordenada,
     plazoMs = 2_000,
   ): Promise<Sugerencia[] | null> {
     if (!this.llave) return null;
+    const { sur, oeste, norte, este } = zonaServicio();
     try {
       const respuesta = await fetch(URL_AUTOCOMPLETAR, {
         method: 'POST',
@@ -81,10 +79,10 @@ export class GoogleLugaresService {
           sessionToken: sesion,
           languageCode: 'es',
           includedRegionCodes: ['co'],
-          locationBias: {
-            circle: {
-              center: { latitude: cerca.lat, longitude: cerca.lng },
-              radius: RADIO_SESGO_M,
+          locationRestriction: {
+            rectangle: {
+              low: { latitude: sur, longitude: oeste },
+              high: { latitude: norte, longitude: este },
             },
           },
         }),
@@ -123,12 +121,15 @@ export class GoogleLugaresService {
     }
   }
 
-  /** Dirección y punto de una sugerencia; cierra la sesión de autocompletado. */
+  /**
+   * Dirección y punto de una sugerencia; cierra la sesión de autocompletado.
+   * `undefined` si el lugar queda fuera de la zona de servicio.
+   */
   async detalle(
     placeId: string,
     sesion: string,
     plazoMs = 2_000,
-  ): Promise<Lugar | null> {
+  ): Promise<Lugar | null | undefined> {
     if (!this.llave) return null;
     try {
       const url = new URL(encodeURIComponent(placeId), URL_LUGAR);
@@ -155,6 +156,7 @@ export class GoogleLugaresService {
         return null;
       }
       this.logger.log({ sesion }, 'Place Details consumido');
+      if (!dentroDeZonaServicio({ lat, lng })) return undefined;
       return {
         place_id: lugar.id ?? placeId,
         direccion: lugar.formattedAddress,
@@ -168,7 +170,8 @@ export class GoogleLugaresService {
 
   /**
    * Dirección → punto. Devuelve `undefined` si Google respondió sin resultados
-   * (la dirección no existe) y `null` si Google no está disponible.
+   * dentro de la zona de servicio (la dirección no existe para nosotros) y
+   * `null` si Google no está disponible.
    */
   async geocodificar(
     direccion: string,
@@ -177,11 +180,15 @@ export class GoogleLugaresService {
     return this.geocode({ address: direccion }, plazoMs);
   }
 
-  /** Punto → dirección, con la misma convención que geocodificar(). */
+  /**
+   * Punto → dirección, con la misma convención que geocodificar(). Un punto
+   * fuera de la zona de servicio no se consulta: `undefined`.
+   */
   async geocodificarInversa(
     c: Coordenada,
     plazoMs = 2_000,
   ): Promise<Geocodificacion | null | undefined> {
+    if (this.llave && !dentroDeZonaServicio(c)) return undefined;
     return this.geocode({ latlng: `${c.lat},${c.lng}` }, plazoMs);
   }
 
@@ -195,7 +202,12 @@ export class GoogleLugaresService {
       for (const [k, v] of Object.entries(consulta)) url.searchParams.set(k, v);
       url.searchParams.set('region', 'co');
       url.searchParams.set('language', 'es');
-      if (consulta.address) url.searchParams.set('components', 'country:CO');
+      if (consulta.address) {
+        const { sur, oeste, norte, este } = zonaServicio();
+        url.searchParams.set('components', 'country:CO');
+        // bounds solo sesga: el filtro de abajo descarta lo que quede afuera.
+        url.searchParams.set('bounds', `${sur},${oeste}|${norte},${este}`);
+      }
       url.searchParams.set('key', this.llave);
       const respuesta = await fetch(url, {
         signal: AbortSignal.timeout(plazoMs),
@@ -220,16 +232,19 @@ export class GoogleLugaresService {
         this.logger.warn({ status }, 'Geocoding rechazó la consulta');
         return null;
       }
-      const r = results?.[0];
-      const { lat, lng } = r?.geometry?.location ?? {};
-      if (!r?.formatted_address || lat === undefined || lng === undefined) {
-        return undefined;
+      for (const r of results ?? []) {
+        const { lat, lng } = r.geometry?.location ?? {};
+        if (!r.formatted_address || lat === undefined || lng === undefined) {
+          continue;
+        }
+        if (!dentroDeZonaServicio({ lat, lng })) continue;
+        return {
+          direccion: r.formatted_address,
+          ubicacion: { lat, lng },
+          precision: r.geometry?.location_type ?? 'APPROXIMATE',
+        };
       }
-      return {
-        direccion: r.formatted_address,
-        ubicacion: { lat, lng },
-        precision: r.geometry?.location_type ?? 'APPROXIMATE',
-      };
+      return undefined;
     } catch (err) {
       this.logger.warn({ err }, 'Geocoding no respondió');
       return null;

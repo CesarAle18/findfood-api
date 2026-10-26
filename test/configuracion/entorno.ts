@@ -14,4 +14,9 @@ process.env.SUPABASE_SERVICE_ROLE_KEY = 'clave-de-servicio-de-pruebas';
 process.env.SUPABASE_JWT_SECRET = 'secreto-de-pruebas-findfood-e2e';
 process.env.TAREAS_HABILITADAS = 'false';
 delete process.env.GOOGLE_MAPS_API_KEY;
+// Cada suite vive en una ciudad distinta para no competir con las demás
+// (escenario.ts): la zona de servicio se amplía a toda Colombia. La suite
+// zona-servicio la vuelve a la de Bogotá. Este archivo corre antes de cada
+// suite, así que ningún cambio pasa de una a otra.
+process.env.ZONA_SERVICIO = '-4.3,-79.1,13.5,-66.8';
 delete process.env.BREVO_API_KEY;

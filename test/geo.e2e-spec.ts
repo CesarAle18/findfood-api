@@ -7,7 +7,6 @@ import { type Cuenta, ContextoPruebas } from './utilidades/app-de-pruebas';
  * donaciones, así que no interfiere con los filtros duros de otras suites.
  */
 describe('Geo', () => {
-  const ZONA = { lat: 10.4, lng: -75.5 };
   let ctx: ContextoPruebas;
   let persona: Cuenta;
   const sesion = randomUUID();
@@ -54,27 +53,26 @@ describe('Geo', () => {
     await ctx.como(persona).get('/v1/geo/inversa?lat=95&lng=-74').expect(400);
   });
 
-  it('autocompleta con sesgo hacia el punto dado', async () => {
+  it('autocompleta en la zona de servicio', async () => {
     ctx.lugares.sugerencias = [
       { place_id: 'ChIJ72', principal: 'Calle 72 #10-34', secundario: 'Bogotá' },
     ];
     const r = await ctx
       .como(persona)
-      .get(
-        `/v1/geo/autocompletar?q=calle 72&sesion=${sesion}&lat=${ZONA.lat}&lng=${ZONA.lng}`,
-      )
-      .expect(200);
-    expect(r.body.sugerencias).toHaveLength(1);
-    expect(ctx.lugares.llamadas[0].args).toEqual(['calle 72', sesion, ZONA]);
-  });
-
-  it('sin punto, sesga hacia el banco o el centro de Bogotá', async () => {
-    await ctx
-      .como(persona)
       .get(`/v1/geo/autocompletar?q=calle 72&sesion=${sesion}`)
       .expect(200);
-    const cerca = ctx.lugares.llamadas[0].args[2] as { lat: number };
-    expect(cerca.lat).toBeCloseTo(4.6, 0);
+    expect(r.body.sugerencias).toHaveLength(1);
+    expect(ctx.lugares.llamadas[0].args).toEqual(['calle 72', sesion]);
+  });
+
+  it('acepta e ignora lat/lng obsoletos en el autocompletado', async () => {
+    await ctx
+      .como(persona)
+      .get(
+        `/v1/geo/autocompletar?q=calle 72&sesion=${sesion}&lat=6.24&lng=-75.58`,
+      )
+      .expect(200);
+    expect(ctx.lugares.llamadas[0].args).toEqual(['calle 72', sesion]);
   });
 
   it('devuelve el lugar elegido y rechaza ids con caracteres extraños', async () => {
@@ -91,6 +89,14 @@ describe('Geo', () => {
     await ctx
       .como(persona)
       .get(`/v1/geo/lugares/a.b?sesion=${sesion}`)
+      .expect(404);
+  });
+
+  it('un lugar fuera de la zona de servicio responde 404', async () => {
+    ctx.lugares.lugar = undefined;
+    await ctx
+      .como(persona)
+      .get(`/v1/geo/lugares/ChIJmed?sesion=${sesion}`)
       .expect(404);
   });
 

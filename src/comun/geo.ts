@@ -1,5 +1,10 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsLatitude, IsLongitude } from 'class-validator';
+import {
+  IsLatitude,
+  IsLongitude,
+  ValidateBy,
+  type ValidationOptions,
+} from 'class-validator';
 import { Prisma } from '../generated/prisma/client';
 
 export interface Coordenada {
@@ -15,6 +20,91 @@ export class CoordenadaDto implements Coordenada {
   @ApiProperty({ example: -74.0836 })
   @IsLongitude()
   lng: number;
+}
+
+/** Rectángulo en grados: límites sur/norte (lat) y oeste/este (lng). */
+export interface ZonaServicio {
+  sur: number;
+  norte: number;
+  oeste: number;
+  este: number;
+}
+
+/**
+ * Zona de servicio por omisión: Bogotá y sus municipios vecinos (Soacha, Chía,
+ * Cajicá, Cota, Funza, Mosquera, Madrid, La Calera, Sibaté, Tocancipá…). Es
+ * un rectángulo aproximado; la app usa los mismos números. Limita la búsqueda
+ * de direcciones y los puntos que se guardan (recogida, base del voluntario).
+ */
+export const ZONA_SERVICIO_BOGOTA: Readonly<ZonaServicio> = Object.freeze({
+  sur: 4.44,
+  norte: 5.0,
+  oeste: -74.3,
+  este: -73.95,
+});
+
+/**
+ * Lee `sur,oeste,norte,este` (formato de la variable ZONA_SERVICIO). `null`
+ * si no son cuatro números finitos con sur < norte y oeste < este.
+ */
+export function parsearZonaServicio(texto: string): ZonaServicio | null {
+  const partes = texto.split(',').map((p) => p.trim());
+  if (partes.length !== 4 || partes.some((p) => p === '')) return null;
+  const [sur, oeste, norte, este] = partes.map(Number);
+  if (![sur, oeste, norte, este].every(Number.isFinite)) return null;
+  if (sur >= norte || oeste >= este) return null;
+  return { sur, oeste, norte, este };
+}
+
+let zonaEnCache: Readonly<ZonaServicio> | undefined;
+
+/**
+ * Zona de servicio configurada. Los decoradores de validación corren fuera de
+ * la inyección de dependencias, así que se lee de process.env.ZONA_SERVICIO
+ * la primera vez y se guarda. La configuración (configuracion.ts) ya rechaza
+ * un valor inválido al arrancar; aquí uno inválido cae a Bogotá.
+ */
+export function zonaServicio(): Readonly<ZonaServicio> {
+  if (!zonaEnCache) {
+    const texto = process.env.ZONA_SERVICIO;
+    zonaEnCache =
+      (texto ? parsearZonaServicio(texto) : null) ?? ZONA_SERVICIO_BOGOTA;
+  }
+  return zonaEnCache;
+}
+
+/** Solo pruebas: olvida la zona leída para volver a leer process.env. */
+export function reiniciarZonaServicio(): void {
+  zonaEnCache = undefined;
+}
+
+/** ¿El punto está en la zona de servicio configurada? Incluye el borde. */
+export function dentroDeZonaServicio(c: Coordenada): boolean {
+  const { sur, norte, oeste, este } = zonaServicio();
+  return c.lat >= sur && c.lat <= norte && c.lng >= oeste && c.lng <= este;
+}
+
+/**
+ * Exige que la coordenada esté en la zona de servicio. Solo mira objetos con
+ * lat/lng numéricos: la forma y la presencia las validan los demás decoradores.
+ */
+export function DentroDeZonaServicio(opciones?: ValidationOptions) {
+  return ValidateBy(
+    {
+      name: 'dentroDeZonaServicio',
+      validator: {
+        validate: (valor: unknown) => {
+          if (typeof valor !== 'object' || valor === null) return true;
+          const { lat, lng } = valor as Partial<Coordenada>;
+          if (typeof lat !== 'number' || typeof lng !== 'number') return true;
+          return dentroDeZonaServicio({ lat, lng });
+        },
+        defaultMessage: () =>
+          'El punto debe estar en Bogotá o un municipio vecino.',
+      },
+    },
+    opciones,
+  );
 }
 
 /** Fragmento SQL de un punto geography(Point,4326). PostGIS recibe (lng, lat). */
