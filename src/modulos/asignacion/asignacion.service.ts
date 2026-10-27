@@ -25,6 +25,8 @@ export interface OpcionesCierre {
   motivo?: string;
   /** Avisar al voluntario que ya no debe recoger (DONACION_CANCELADA). */
   notificar?: boolean;
+  /** El llamador cierra la ruta por su cuenta: no cancelarla aunque quede vacía. */
+  conservarRuta?: boolean;
 }
 
 @Injectable()
@@ -104,7 +106,7 @@ export class AsignacionService {
         usuarioId: op.usuarioId,
         motivo: op.motivo,
       });
-      if (a.ruta_id)
+      if (a.ruta_id) {
         await this.omitirParada(
           tx,
           a.ruta_id,
@@ -112,6 +114,9 @@ export class AsignacionService {
           op.usuarioId,
           op.motivo,
         );
+        if (!op.conservarRuta)
+          await this.cancelarRutaVacia(tx, a.ruta_id, op.usuarioId, op.motivo);
+      }
       if (op.notificar && a.voluntario_id) {
         const [v] = await tx.$queryRaw<
           { usuario_id: string; codigo: string }[]
@@ -156,6 +161,44 @@ export class AsignacionService {
         motivo,
       });
     }
+  }
+
+  /**
+   * Una ruta activa cuyas recogidas quedaron todas OMITIDA (abandono o
+   * cancelación antes de llegar) no tiene nada que hacer: se cancela para que
+   * deje de aparecer como EN_CURSO. Si se recogió algo, o alguna recogida
+   * quedó FALLIDA, sigue viva y el voluntario la cierra con la entrega.
+   */
+  private async cancelarRutaVacia(
+    tx: Tx,
+    rutaId: string,
+    usuarioId?: string | null,
+    motivo?: string,
+  ): Promise<void> {
+    const [ruta] = await tx.$queryRaw<{ estado: string }[]>`
+      SELECT r.estado::text AS estado FROM ruta r
+       WHERE r.id = ${rutaId}::uuid AND r.estado IN ('PLANIFICADA','EN_CURSO')
+         AND NOT EXISTS (SELECT 1 FROM parada_ruta p
+                          WHERE p.ruta_id = r.id AND p.tipo = 'RECOGIDA'
+                            AND p.estado <> 'OMITIDA')
+       FOR UPDATE OF r`;
+    if (!ruta) return;
+    await tx.parada_ruta.updateMany({
+      where: { ruta_id: rutaId, estado: { in: ['PENDIENTE', 'EN_SITIO'] } },
+      data: { estado: 'OMITIDA' },
+    });
+    await tx.ruta.update({
+      where: { id: rutaId },
+      data: { estado: 'CANCELADA', cancelada_at: new Date() },
+    });
+    await this.trazabilidad.registrar(tx, {
+      ambito: 'RUTA',
+      entidad: { rutaId },
+      anterior: ruta.estado,
+      nuevo: 'CANCELADA',
+      usuarioId,
+      motivo: motivo ?? 'La ruta se quedó sin recogidas',
+    });
   }
 
   /** Al confirmar la ENTREGA en la sede: ACEPTADA → COMPLETADA. */
@@ -540,7 +583,7 @@ export class AsignacionService {
           usuarioId: usuario.id,
           motivo: motivo.nombre,
         });
-        if (a.ruta_id)
+        if (a.ruta_id) {
           await this.omitirParada(
             tx,
             a.ruta_id,
@@ -548,6 +591,13 @@ export class AsignacionService {
             usuario.id,
             motivo.nombre,
           );
+          await this.cancelarRutaVacia(
+            tx,
+            a.ruta_id,
+            usuario.id,
+            motivo.nombre,
+          );
+        }
 
         const republicada = await this.donaciones.reabrirPublicacion(
           tx,

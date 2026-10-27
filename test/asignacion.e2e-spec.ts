@@ -365,16 +365,31 @@ describe('Asignación', () => {
       const id = await crearDonacion(donante);
       await publicar(donante, id);
       const oferta = await ofertaDe(id, v1);
-      await ctx
+      const aceptada = await ctx
         .como(v1)
         .post(`/v1/asignaciones/${oferta.id}/aceptar`)
         .expect(200);
+      const rutaId: string = aceptada.body.ruta.id;
       const r = await ctx
         .como(v1)
         .post(`/v1/asignaciones/${oferta.id}/abandonar`)
         .send({ motivo_id: cat.motivo('ABANDONO_ASIGNACION', 'VEHICULO') })
         .expect(200);
       expect(r.body.donacion_republicada).toBe(true);
+      // La ruta se quedó sin recogidas: deja de estar en curso.
+      const { rows: rutas } = await ctx.sql.query<{ estado: string }>(
+        `SELECT estado::text FROM ruta WHERE id = $1`,
+        [rutaId],
+      );
+      expect(rutas).toEqual([{ estado: 'CANCELADA' }]);
+      const enCurso = await ctx
+        .como(v1)
+        .get('/v1/rutas?estado=EN_CURSO')
+        .expect(200);
+      const ids = (enCurso.body.datos ?? enCurso.body).map(
+        (x: { id: string }) => x.id,
+      );
+      expect(ids).not.toContain(rutaId);
       const [siguiente] = await ofertaVigente(id);
       expect(siguiente).toMatchObject({
         estado: 'OFRECIDA',

@@ -1039,6 +1039,7 @@ export class RuteoService {
             await this.asignacion.cerrarVigentes(tx, donacionId, 'CANCELADA', {
               motivo: MOTIVO_RUTA_VENCIDA,
               notificar: true,
+              conservarRuta: true,
             });
             await this.donaciones.expirar(
               tx,
@@ -1048,7 +1049,10 @@ export class RuteoService {
             );
           }
           await tx.parada_ruta.updateMany({
-            where: { ruta_id: ruta.id, estado: { in: ['PENDIENTE', 'EN_SITIO'] } },
+            where: {
+              ruta_id: ruta.id,
+              estado: { in: ['PENDIENTE', 'EN_SITIO'] },
+            },
             data: { estado: 'OMITIDA' },
           });
           await tx.ruta.update({
