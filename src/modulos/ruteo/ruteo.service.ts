@@ -1005,7 +1005,7 @@ export class RuteoService {
         }
       }
     });
-    for (const d of republicar) await this.donaciones.iniciarCascadaSegura(d);
+    for (const d of republicar) await this.donaciones.iniciarOfertaSegura(d);
     return this.detalle(usuario, id);
   }
 

@@ -57,14 +57,14 @@ npm run start:local       # API against the local DB (ENV_FILE=.env.local, STORA
 - **Serialization:** `SerializacionInterceptor` turns `Decimal` and `BigInt` into numbers.
 - **State transitions:** every one writes `historial_estado` and any `notificacion` row in the same `prisma.transaccion()`. `notificacion` is the push outbox.
 - **Module wiring** (`src/modulos/`):
-  - `donaciones` ⇄ `asignacion` are mutually dependent via `forwardRef`: publishing starts the cascade, and accepting changes the donation state.
+  - `donaciones` ⇄ `asignacion` are mutually dependent via `forwardRef`: publishing starts the offers, and accepting changes the donation state.
   - `ruteo` and `inventario` build on both.
   - Cross-module state changes go through exported tx-taking primitives: `DonacionesService.transicion/bloquear/reabrirPublicacion/expirar`, `AsignacionService.cerrarVigentes/completar/asignarAFlota`, `LotesService.mover`, `IncidenciasService.registrar`.
 - **Assignment engine** (`asignacion/motor.service.ts`):
   - Stage 1 is `fn_candidatos_donacion`.
-  - Stage 2 is Route Matrix. It runs **outside** transactions and only when the stored ranking has no valid next candidate but new feasible volunteers exist.
+  - Stage 2 is Route Matrix for the closest `MAX_CANDIDATOS_MATRIX` (the rest use geodesic distance). It runs **outside** transactions, and only when there are volunteers who haven't been offered yet.
   - Scoring is the pure `puntaje.ts`.
-  - Offers rely on `uq_asignacion_vigente` / `uq_asignacion_intento`. A losing concurrent insert returns `null`.
+  - Offers are **simultaneous**: `ofrecer` creates one `OFRECIDA` per feasible volunteer (all expire with the publication). The first to accept wins (`aceptar` locks the donation; `uq_asignacion_aceptada`) and the other live offers become `CANCELADA`. `uq_asignacion_ofrecida` / `uq_asignacion_intento` make concurrent offers no-ops.
 - **Pure, unit-tested logic:** `puntaje.ts`, `donaciones/urgencia.ts`, `ruteo/optimizacion.ts` (nearest neighbor + 2-opt + brute force).
 - **Scheduled jobs:** `tareas/` only triggers (`@Cron`). The logic is in services, uses `FOR UPDATE SKIP LOCKED` and is idempotent. `TAREAS_HABILITADAS=false` in tests. Call the service methods directly (e.g. `MotorAsignacionService.vencerOfertas`).
 - **Idempotency:** state-based. A repeated confirmation by the same user returns 200; evidence uses the client-generated `id`.

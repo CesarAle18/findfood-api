@@ -567,38 +567,51 @@ export class DonacionesService {
     if (!d) throw noEncontrado('Donación');
 
     // Relación 1:1 errónea en el esquema introspectado: se consulta asignacion.
-    const asignacion = await this.prisma.asignacion.findFirst({
-      where: {
-        donacion_id: id,
-        estado: { in: ['OFRECIDA', 'ACEPTADA', 'COMPLETADA'] },
-      },
-      orderBy: { intento: 'desc' },
-      select: {
-        id: true,
-        estado: true,
-        intento: true,
-        expira_at: true,
-        aceptada_at: true,
-        ruta_id: true,
-        banco_ejecutor_id: true,
-        voluntario: {
-          select: {
-            usuario_id: true,
-            placa_vehiculo: true,
-            tipo_vehiculo: { select: { nombre: true } },
-            usuario_voluntario_usuario_idTousuario: {
-              select: { nombres: true, apellidos: true, telefono: true },
-            },
+    // Con ofertas simultáneas puede haber varias OFRECIDA: se prefiere la
+    // aceptada/completada y, si no hay, la oferta propia del voluntario.
+    const seleccionAsignacion = {
+      id: true,
+      estado: true,
+      intento: true,
+      expira_at: true,
+      aceptada_at: true,
+      ruta_id: true,
+      banco_ejecutor_id: true,
+      voluntario: {
+        select: {
+          usuario_id: true,
+          placa_vehiculo: true,
+          tipo_vehiculo: { select: { nombre: true } },
+          usuario_voluntario_usuario_idTousuario: {
+            select: { nombres: true, apellidos: true, telefono: true },
           },
         },
-        // Para calificada_por_mi: a lo sumo una fila (uq_calificacion).
-        calificacion: {
-          where: { calificador_id: usuario.id },
-          select: { id: true },
-          take: 1,
-        },
       },
-    });
+      // Para calificada_por_mi: a lo sumo una fila (uq_calificacion).
+      calificacion: {
+        where: { calificador_id: usuario.id },
+        select: { id: true },
+        take: 1,
+      },
+    } as const;
+    const asignacion =
+      (await this.prisma.asignacion.findFirst({
+        where: {
+          donacion_id: id,
+          estado: { in: ['ACEPTADA', 'COMPLETADA'] },
+        },
+        orderBy: { intento: 'desc' },
+        select: seleccionAsignacion,
+      })) ??
+      (await this.prisma.asignacion.findFirst({
+        where: {
+          donacion_id: id,
+          estado: 'OFRECIDA',
+          voluntario: { usuario_id: usuario.id },
+        },
+        orderBy: { intento: 'desc' },
+        select: seleccionAsignacion,
+      }));
 
     const personal = esPersonal(usuario);
     const esDueno = d.donante.usuario_id === usuario.id;
@@ -859,23 +872,23 @@ export class DonacionesService {
       });
     });
 
-    const ofertaId = await this.iniciarCascadaSegura(id);
+    const ofertas = await this.iniciarOfertaSegura(id);
     return {
       ...(await this.detalle(usuario, id)),
-      oferta_en_curso: Boolean(ofertaId),
+      oferta_en_curso: ofertas > 0,
     };
   }
 
-  /** La cascada nunca hace fallar la operación que la dispara: el reloj la reintenta (§7). */
-  async iniciarCascadaSegura(donacionId: string): Promise<string | null> {
+  /** La oferta nunca hace fallar la operación que la dispara: el reloj la reintenta (§7). */
+  async iniciarOfertaSegura(donacionId: string): Promise<number> {
     try {
-      return await this.asignacion.ofrecerSiguiente(donacionId);
+      return await this.asignacion.ofrecer(donacionId);
     } catch (err) {
       this.logger.error(
         { err, donacionId },
-        'No se pudo iniciar la cascada; la reintentará vencer_ofertas',
+        'No se pudo ofrecer la donación; la reintentará vencer_ofertas',
       );
-      return null;
+      return 0;
     }
   }
 
@@ -988,10 +1001,10 @@ export class DonacionesService {
         data: { modo_recoleccion: 'VOLUNTARIO' },
       });
     });
-    const ofertaId = await this.iniciarCascadaSegura(id);
+    const ofertas = await this.iniciarOfertaSegura(id);
     return {
       ...(await this.detalle(usuario, id)),
-      oferta_en_curso: Boolean(ofertaId),
+      oferta_en_curso: ofertas > 0,
     };
   }
 }

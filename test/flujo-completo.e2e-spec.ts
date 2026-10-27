@@ -121,7 +121,10 @@ describe('Flujo completo de una donación', () => {
     const primero = candidatos.body.find(
       (c: { posicion: number }) => c.posicion === 1,
     );
-    expect(primero.ofrecido).toBe(true);
+    // Se ofrece a todos a la vez; el ranking explica el orden de puntaje.
+    expect(
+      candidatos.body.every((c: { ofrecido: boolean }) => c.ofrecido),
+    ).toBe(true);
     // Mismo historial y misma carga: gana la proximidad.
     expect(primero.voluntario.id).toBe(cercano.voluntarioId);
 
@@ -153,10 +156,10 @@ describe('Flujo completo de una donación', () => {
         WHERE n.usuario_id = $1 AND t.codigo = 'ASIGNACION_OFRECIDA'`,
       [cercano.id],
     );
-    expect(rows[0].cuerpo).toMatch(/Tienes 10 minutos para responder/);
+    expect(rows[0].cuerpo).toMatch(/Tienes \d+ minutos para responder/);
   });
 
-  it('rechazar ofrece de inmediato al siguiente candidato', async () => {
+  it('rechazar cierra solo la oferta propia: la del otro voluntario sigue viva', async () => {
     await ctx
       .como(cercano)
       .post(`/v1/asignaciones/${ofertaId}/rechazar`)
@@ -417,8 +420,8 @@ describe('Flujo completo de una donación', () => {
       .map((h: { estado_nuevo: string }) => h.estado_nuevo);
     expect(asignaciones).toEqual([
       'OFRECIDA',
-      'RECHAZADA',
       'OFRECIDA',
+      'RECHAZADA',
       'ACEPTADA',
       'COMPLETADA',
     ]);
@@ -538,8 +541,14 @@ describe('Flujo completo de una donación', () => {
       })
       .expect(201);
     const envio = ctx.app.get(EnvioNotificacionesService);
-    const resultado = await envio.procesarPendientes();
-    expect(resultado.enviadas).toBeGreaterThan(0);
+    // Las suites anteriores dejan notificaciones pendientes: se drenan los lotes.
+    let enviadas = 0;
+    for (;;) {
+      const lote = await envio.procesarPendientes();
+      enviadas += lote.enviadas;
+      if (lote.enviadas + lote.fallidas === 0) break;
+    }
+    expect(enviadas).toBeGreaterThan(0);
     const alDonante = ctx.push.enviados.filter(
       (m) => m.token === 'ExponentPushToken[donante-prueba]',
     );

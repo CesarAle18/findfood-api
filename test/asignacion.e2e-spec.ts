@@ -13,7 +13,7 @@ import {
 
 type Voluntario = Cuenta & { voluntarioId: string };
 
-/** Motor de asignación (§6): filtros duros, plazos, cascada e invariantes. */
+/** Motor de asignación (§6): filtros duros, plazos, oferta simultánea e invariantes. */
 describe('Asignación', () => {
   // Zona propia, lejos de las otras suites: sus voluntarios no son candidatos aquí.
   const ZONA = { lat: 5.5, lng: -73.5 };
@@ -72,6 +72,17 @@ describe('Asignación', () => {
       [donacionId],
     );
     return rows;
+  }
+
+  /** Última oferta/asignación de un voluntario concreto sobre la donación. */
+  async function ofertaDe(donacionId: string, v: Voluntario) {
+    const { rows } = await ctx.sql.query<{ id: string; estado: string }>(
+      `SELECT id, estado::text FROM asignacion
+        WHERE donacion_id = $1 AND voluntario_id = $2
+        ORDER BY intento DESC LIMIT 1`,
+      [donacionId, v.voluntarioId],
+    );
+    return rows[0];
   }
 
   async function apagarVoluntarios() {
@@ -190,7 +201,7 @@ describe('Asignación', () => {
     });
   });
 
-  describe('Plazos y cascada', () => {
+  describe('Plazos y oferta simultánea', () => {
     let v1: Voluntario;
     let v2: Voluntario;
     let donante: Cuenta;
@@ -201,11 +212,83 @@ describe('Asignación', () => {
       donante = await ctx.cuenta();
     });
 
-    it('una oferta vencida no se acepta aunque el reloj no haya pasado; el reloj ofrece al siguiente', async () => {
+    it('publicar ofrece la donación a todos los voluntarios factibles a la vez', async () => {
+      const id = await crearDonacion(donante);
+      const d = await publicar(donante, id);
+      expect(d.oferta_en_curso).toBe(true);
+      const vigentes = await ofertaVigente(id);
+      expect(vigentes.map((o) => o.voluntario_id).sort()).toEqual(
+        [v1.voluntarioId, v2.voluntarioId].sort(),
+      );
+      expect(vigentes.every((o) => o.estado === 'OFRECIDA')).toBe(true);
+      for (const v of [v1, v2]) {
+        const r = await ctx.como(v).get('/v1/asignaciones/ofertas').expect(200);
+        expect(
+          r.body.map((o: { donacion_id: string }) => o.donacion_id),
+        ).toEqual([id]);
+      }
+    });
+
+    it('el primero en aceptar se queda la donación y la oferta del otro desaparece', async () => {
       const id = await crearDonacion(donante);
       await publicar(donante, id);
-      const [oferta] = await ofertaVigente(id);
-      expect(oferta.voluntario_id).toBe(v1.voluntarioId);
+      const o1 = await ofertaDe(id, v1);
+      const o2 = await ofertaDe(id, v2);
+      await ctx.como(v2).post(`/v1/asignaciones/${o2.id}/aceptar`).expect(200);
+
+      expect(await ofertaVigente(id)).toEqual([
+        expect.objectContaining({
+          voluntario_id: v2.voluntarioId,
+          estado: 'ACEPTADA',
+        }),
+      ]);
+      const r = await ctx.como(v1).get('/v1/asignaciones/ofertas').expect(200);
+      expect(r.body).toEqual([]);
+      const tarde = await ctx
+        .como(v1)
+        .post(`/v1/asignaciones/${o1.id}/aceptar`)
+        .expect(409);
+      expect(tarde.body.type).toBe('oferta-tomada');
+    });
+
+    it('[invariante] aceptaciones simultáneas: exactamente una gana', async () => {
+      const id = await crearDonacion(donante);
+      await publicar(donante, id);
+      const o1 = await ofertaDe(id, v1);
+      const o2 = await ofertaDe(id, v2);
+      const respuestas = await Promise.all([
+        ctx.como(v1).post(`/v1/asignaciones/${o1.id}/aceptar`),
+        ctx.como(v2).post(`/v1/asignaciones/${o2.id}/aceptar`),
+      ]);
+      expect(respuestas.map((r) => r.status).sort()).toEqual([200, 409]);
+      const vigentes = await ofertaVigente(id);
+      expect(vigentes).toHaveLength(1);
+      expect(vigentes[0].estado).toBe('ACEPTADA');
+    });
+
+    it('rechazar cierra solo la oferta propia: la del otro sigue viva', async () => {
+      const id = await crearDonacion(donante);
+      await publicar(donante, id);
+      const o1 = await ofertaDe(id, v1);
+      await ctx
+        .como(v1)
+        .post(`/v1/asignaciones/${o1.id}/rechazar`)
+        .send({ motivo_id: cat.motivo('RECHAZO_ASIGNACION', 'SIN_TIEMPO') })
+        .expect(200);
+      expect(await ofertaVigente(id)).toEqual([
+        expect.objectContaining({
+          voluntario_id: v2.voluntarioId,
+          estado: 'OFRECIDA',
+        }),
+      ]);
+      // Quien rechazó no la vuelve a recibir.
+      expect(await motor.ofrecer(id)).toBe(0);
+    });
+
+    it('una oferta vencida no se acepta aunque el reloj no haya pasado', async () => {
+      const id = await crearDonacion(donante);
+      await publicar(donante, id);
+      const oferta = await ofertaDe(id, v1);
       await ctx.sql.query(
         `UPDATE asignacion SET expira_at = ofrecida_at + interval '1 second' WHERE id = $1`,
         [oferta.id],
@@ -220,8 +303,16 @@ describe('Asignación', () => {
 
       const resultado = await motor.vencerOfertas();
       expect(resultado.vencidas).toBeGreaterThanOrEqual(1);
-      const [siguiente] = await ofertaVigente(id);
-      expect(siguiente.voluntario_id).toBe(v2.voluntarioId);
+      expect((await ofertaDe(id, v2)).estado).toBe('OFRECIDA');
+    });
+
+    it('el reloj alcanza a un voluntario que se habilita después de publicar', async () => {
+      const id = await crearDonacion(donante);
+      await publicar(donante, id);
+      const v3 = await ctx.voluntario(admin, cerca(0.015));
+      expect(await ofertaDe(id, v3)).toBeUndefined();
+      await motor.vencerOfertas();
+      expect((await ofertaDe(id, v3)).estado).toBe('OFRECIDA');
     });
 
     it('al vencer la publicación la donación expira, se avisa al donante y se puede republicar', async () => {
@@ -254,24 +345,26 @@ describe('Asignación', () => {
       expect(otra.oferta_en_curso).toBe(true);
     });
 
-    it('[invariante] nunca dos ofertas vivas, aunque varios procesos compitan', async () => {
+    it('[invariante] ofrecer es idempotente aunque varios procesos compitan', async () => {
       const id = await crearDonacion(donante);
       await publicar(donante, id);
       await ctx.sql.query(
         `UPDATE asignacion SET estado = 'EXPIRADA', finalizada_at = now() WHERE donacion_id = $1`,
         [id],
       );
-      const ofertas = await Promise.all(
-        Array.from({ length: 6 }, () => motor.ofrecerSiguiente(id)),
+      const creadas = await Promise.all(
+        Array.from({ length: 6 }, () => motor.ofrecer(id)),
       );
-      expect(ofertas.filter(Boolean)).toHaveLength(1);
-      expect(await ofertaVigente(id)).toHaveLength(1);
+      expect(creadas.reduce((a, b) => a + b, 0)).toBe(2);
+      const vigentes = await ofertaVigente(id);
+      expect(vigentes).toHaveLength(2);
+      expect(new Set(vigentes.map((o) => o.voluntario_id)).size).toBe(2);
     });
 
     it('abandonar con margen republica la donación y la ofrece a otro', async () => {
       const id = await crearDonacion(donante);
       await publicar(donante, id);
-      const [oferta] = await ofertaVigente(id);
+      const oferta = await ofertaDe(id, v1);
       await ctx
         .como(v1)
         .post(`/v1/asignaciones/${oferta.id}/aceptar`)
@@ -292,7 +385,7 @@ describe('Asignación', () => {
     it('abandonar sin margen expira la donación y abre una incidencia', async () => {
       const id = await crearDonacion(donante);
       await publicar(donante, id);
-      const [oferta] = await ofertaVigente(id);
+      const oferta = await ofertaDe(id, v1);
       await ctx
         .como(v1)
         .post(`/v1/asignaciones/${oferta.id}/aceptar`)
@@ -330,7 +423,7 @@ describe('Asignación', () => {
     it('una donación en recolección solo la cancela el ADMIN: cierra la asignación, omite la parada y avisa al voluntario', async () => {
       const id = await crearDonacion(donante);
       await publicar(donante, id);
-      const [oferta] = await ofertaVigente(id);
+      const oferta = await ofertaDe(id, v1);
       // Aceptar la incorpora a la ruta del voluntario: ya está EN_RECOLECCION.
       const aceptada = await ctx
         .como(v1)
@@ -378,7 +471,7 @@ describe('Asignación', () => {
     it('el personal puede retirar la asignación y reiniciar la cascada', async () => {
       const id = await crearDonacion(donante);
       await publicar(donante, id);
-      const [oferta] = await ofertaVigente(id);
+      const oferta = await ofertaDe(id, v1);
       await ctx
         .como(v1)
         .post(`/v1/asignaciones/${oferta.id}/aceptar`)
@@ -463,7 +556,10 @@ describe('Asignación', () => {
     });
 
     it('solo expone lo que configura el panel web', async () => {
-      const lista = await ctx.como(admin).get('/v1/admin/parametros').expect(200);
+      const lista = await ctx
+        .como(admin)
+        .get('/v1/admin/parametros')
+        .expect(200);
       expect(
         (lista.body as { clave: string }[]).map((p) => p.clave).sort(),
       ).toEqual([

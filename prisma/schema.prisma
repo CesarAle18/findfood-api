@@ -85,7 +85,7 @@ model almacen {
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model asignacion {
   id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  donacion_id       String             @unique(map: "uq_asignacion_vigente", where: raw("(estado = ANY (ARRAY['OFRECIDA'::estado_asignacion, 'ACEPTADA'::estado_asignacion]))")) @db.Uuid
+  donacion_id       String             @unique(map: "uq_asignacion_aceptada", where: raw("(estado = 'ACEPTADA'::estado_asignacion)")) @db.Uuid
   voluntario_id     String?            @db.Uuid
   banco_ejecutor_id String?            @db.Uuid
   ruta_id           String?            @db.Uuid
@@ -114,6 +114,7 @@ model asignacion {
   notificacion      notificacion[]
 
   @@unique([donacion_id, intento], map: "uq_asignacion_intento")
+  @@unique([donacion_id, voluntario_id], map: "uq_asignacion_ofrecida", where: raw("(estado = 'OFRECIDA'::estado_asignacion)"))
   @@index([expira_at], map: "ix_asignacion_expira", where: raw("(estado = 'OFRECIDA'::estado_asignacion)"))
   @@index([voluntario_id, estado, ofrecida_at(sort: Desc)], map: "ix_asignacion_voluntario")
   @@schema("public")

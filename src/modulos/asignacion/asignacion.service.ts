@@ -43,18 +43,19 @@ export class AsignacionService {
     private readonly donaciones: DonacionesService,
   ) {}
 
-  ofrecerSiguiente(donacionId: string): Promise<string | null> {
-    return this.motor.ofrecerSiguiente(donacionId);
+  /** Ofrece la donación a todos los voluntarios factibles; devuelve las ofertas nuevas. */
+  ofrecer(donacionId: string): Promise<number> {
+    return this.motor.ofrecer(donacionId);
   }
 
-  /** Continúa la cascada sin hacer fallar la petición que la dispara. */
-  private async continuarCascada(donacionId: string): Promise<void> {
+  /** Reofrece sin hacer fallar la petición que lo dispara. */
+  private async continuarOferta(donacionId: string): Promise<void> {
     try {
-      await this.motor.ofrecerSiguiente(donacionId);
+      await this.motor.ofrecer(donacionId);
     } catch (err) {
       this.logger.error(
         { err, donacionId },
-        'No se pudo ofrecer al siguiente candidato',
+        'No se pudo reofrecer la donación',
       );
     }
   }
@@ -262,9 +263,27 @@ export class AsignacionService {
   ): Promise<never> {
     const a = await tx.asignacion.findUnique({
       where: { id },
-      select: { voluntario_id: true, estado: true, expira_at: true },
+      select: {
+        donacion_id: true,
+        voluntario_id: true,
+        estado: true,
+        expira_at: true,
+      },
     });
     if (!a || a.voluntario_id !== voluntarioId) throw noEncontrado('Oferta');
+    const tomada = await tx.asignacion.count({
+      where: {
+        donacion_id: a.donacion_id,
+        voluntario_id: { not: voluntarioId },
+        estado: { in: ['ACEPTADA', 'COMPLETADA'] },
+      },
+    });
+    if (tomada) {
+      throw conflicto(
+        'oferta-tomada',
+        'Otro voluntario ya aceptó esta donación',
+      );
+    }
     if (
       a.estado === 'EXPIRADA' ||
       (a.estado === 'OFRECIDA' && a.expira_at <= new Date())
@@ -286,10 +305,27 @@ export class AsignacionService {
       await tx.$queryRaw`SELECT id FROM voluntario WHERE id = ${voluntario.id}::uuid FOR UPDATE`;
       const oferta = await tx.asignacion.findUnique({
         where: { id },
-        select: { donacion_id: true, voluntario_id: true, estado: true, expira_at: true },
+        select: {
+          donacion_id: true,
+          voluntario_id: true,
+          estado: true,
+          expira_at: true,
+        },
       });
-      if (!oferta || oferta.voluntario_id !== voluntario.id) throw noEncontrado('Oferta');
-      if (oferta.estado !== 'OFRECIDA' || oferta.expira_at <= new Date()) {
+      if (!oferta || oferta.voluntario_id !== voluntario.id)
+        throw noEncontrado('Oferta');
+      // Serializa la carrera entre voluntarios por la misma donación.
+      const bloqueada = await this.donaciones.bloquear(tx, oferta.donacion_id);
+      const actual = await tx.asignacion.findUnique({
+        where: { id },
+        select: { estado: true, expira_at: true },
+      });
+      if (
+        !bloqueada ||
+        bloqueada.estado !== 'PUBLICADA' ||
+        actual?.estado !== 'OFRECIDA' ||
+        actual.expira_at <= new Date()
+      ) {
         await this.motivoRespuestaFallida(tx, id, voluntario.id);
       }
 
@@ -308,12 +344,19 @@ export class AsignacionService {
                  finalizada_at = now(), observacion = ${'Incompatibilidad logística: ' + plan.motivo}
           WHERE id = ${id}::uuid AND estado = 'OFRECIDA'`;
         await this.trazabilidad.registrar(tx, {
-          ambito: 'ASIGNACION', entidad: { asignacionId: id },
-          anterior: 'OFRECIDA', nuevo: 'RECHAZADA', usuarioId: usuario.id,
+          ambito: 'ASIGNACION',
+          entidad: { asignacionId: id },
+          anterior: 'OFRECIDA',
+          nuevo: 'RECHAZADA',
+          usuarioId: usuario.id,
           motivo: plan.motivo,
         });
-        return { aceptada: false as const, donacionId: oferta.donacion_id,
-          codigo: plan.codigo, motivo: plan.motivo };
+        return {
+          aceptada: false as const,
+          donacionId: oferta.donacion_id,
+          codigo: plan.codigo,
+          motivo: plan.motivo,
+        };
       }
 
       const [aceptada] = await tx.$queryRaw<{ donacion_id: string }[]>`
@@ -324,50 +367,86 @@ export class AsignacionService {
         RETURNING donacion_id`;
       if (!aceptada) await this.motivoRespuestaFallida(tx, id, voluntario.id);
       const ok = await this.donaciones.transicion(tx, {
-        donacionId: oferta.donacion_id, desde: ['PUBLICADA'],
-        hacia: 'ASIGNADA', usuarioId: usuario.id,
+        donacionId: oferta.donacion_id,
+        desde: ['PUBLICADA'],
+        hacia: 'ASIGNADA',
+        usuarioId: usuario.id,
         datos: { asignada_at: new Date(), modo_recoleccion: 'VOLUNTARIO' },
       });
-      if (!ok) throw conflicto('donacion-no-disponible', 'La donación ya no está disponible');
+      if (!ok)
+        throw conflicto(
+          'donacion-no-disponible',
+          'La donación ya no está disponible',
+        );
       const enRecogida = await this.donaciones.transicion(tx, {
-        donacionId: oferta.donacion_id, desde: ['ASIGNADA'],
-        hacia: 'EN_RECOLECCION', usuarioId: usuario.id,
+        donacionId: oferta.donacion_id,
+        desde: ['ASIGNADA'],
+        hacia: 'EN_RECOLECCION',
+        usuarioId: usuario.id,
         metadata: { ruta_id: plan.rutaId },
       });
-      if (!enRecogida) throw conflicto('donacion-no-disponible', 'No se pudo iniciar la recogida');
+      if (!enRecogida)
+        throw conflicto(
+          'donacion-no-disponible',
+          'No se pudo iniciar la recogida',
+        );
       await this.trazabilidad.registrar(tx, {
-        ambito: 'ASIGNACION', entidad: { asignacionId: id },
-        anterior: 'OFRECIDA', nuevo: 'ACEPTADA', usuarioId: usuario.id,
+        ambito: 'ASIGNACION',
+        entidad: { asignacionId: id },
+        anterior: 'OFRECIDA',
+        nuevo: 'ACEPTADA',
+        usuarioId: usuario.id,
       });
-      const donacion = await this.donaciones.bloquear(tx, oferta.donacion_id);
+      // Quien llegó primero se queda la donación: las demás ofertas se cierran.
+      await this.cerrarVigentes(tx, oferta.donacion_id, 'CANCELADA', {
+        estados: ['OFRECIDA'],
+        usuarioId: usuario.id,
+        motivo: 'Otro voluntario aceptó la donación',
+      });
       await this.notificaciones.encolar(tx, {
-        usuarioId: donacion!.donante_usuario_id, codigo: 'ASIGNACION_ACEPTADA',
-        donacionId: oferta.donacion_id, asignacionId: id,
+        usuarioId: bloqueada!.donante_usuario_id,
+        codigo: 'ASIGNACION_ACEPTADA',
+        donacionId: oferta.donacion_id,
+        asignacionId: id,
         variables: { voluntario: usuario.nombres },
       });
-      return { aceptada: true as const, rutaId: plan.rutaId, origen: plan.origen };
+      return {
+        aceptada: true as const,
+        rutaId: plan.rutaId,
+        origen: plan.origen,
+      };
     });
     if (!resultado.aceptada) {
-      await this.continuarCascada(resultado.donacionId);
-      throw noProcesable(resultado.codigo, 'La oferta no es compatible con la ruta activa', resultado.motivo);
+      throw noProcesable(
+        resultado.codigo,
+        'La oferta no es compatible con la ruta activa',
+        resultado.motivo,
+      );
     }
     // Fuera de la transacción: el trazado por calles depende de Google y nunca bloquea la aceptación.
     try {
       await this.rutasDinamicas.trazar(resultado.rutaId, resultado.origen);
     } catch (err) {
-      this.logger.warn({ err, rutaId: resultado.rutaId }, 'No se pudo guardar el trazado de la ruta');
+      this.logger.warn(
+        { err, rutaId: resultado.rutaId },
+        'No se pudo guardar el trazado de la ruta',
+      );
     }
-    return { id, estado: 'ACEPTADA', ruta: { id: resultado.rutaId, estado: 'EN_CURSO', actualizada: true } };
+    return {
+      id,
+      estado: 'ACEPTADA',
+      ruta: { id: resultado.rutaId, estado: 'EN_CURSO', actualizada: true },
+    };
   }
 
-  /** Rechazar cierra el intento y ofrece al siguiente EN la misma petición (§6.7). */
+  /** Rechazar cierra solo la oferta propia; las de los demás voluntarios siguen vivas. */
   async rechazar(
     usuario: UsuarioAutenticado,
     id: string,
     dto: RespuestaConMotivoDto,
   ) {
     const voluntario = await this.voluntarios.propio(usuario.id);
-    const donacionId = await this.prisma.transaccion(async (tx) => {
+    await this.prisma.transaccion(async (tx) => {
       const motivo = await validarMotivo(
         tx,
         dto.motivo_id,
@@ -390,9 +469,7 @@ export class AsignacionService {
         usuarioId: usuario.id,
         motivo: motivo.nombre,
       });
-      return rechazada.donacion_id;
     });
-    await this.continuarCascada(donacionId);
     return { id, estado: 'RECHAZADA' };
   }
 
@@ -501,7 +578,7 @@ export class AsignacionService {
         return { donacionId: a.donacion_id, republicada };
       },
     );
-    if (republicada) await this.continuarCascada(donacionId);
+    if (republicada) await this.continuarOferta(donacionId);
     return { id, estado: 'ABANDONADA', donacion_republicada: republicada };
   }
 

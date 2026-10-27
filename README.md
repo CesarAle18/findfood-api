@@ -65,7 +65,7 @@ En Postman, importa la colección y `postman/FindFood-local.postman_environment.
     - el hallazgo crítico #1 (nadie se registra como ADMIN);
     - RLS y privilegios (P5);
     - el flujo completo creación → recepción con trazabilidad;
-    - filtros duros, plazos y cascada, incluida la invariante "nunca dos ofertas vivas" bajo concurrencia;
+    - filtros duros, plazos y cascada, incluida la invariante "una sola asignación aceptada" y ofertas simultáneas, bajo concurrencia;
     - ruteo;
     - FEFO y libro mayor.
 - **CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)): lint, tipos, unitarias, e2e con PostGIS como servicio y *build*.
@@ -94,7 +94,7 @@ En Postman, importa la colección y `postman/FindFood-local.postman_environment.
 | `GET /v1/catalogos` | Tipos de alimento, unidades, vehículos, motivos, tipos de incidencia y destinos para los formularios. `?incluir=unidades_medida,motivos` devuelve solo esos catálogos; `?ambito=RECHAZO_ASIGNACION` filtra los motivos. |
 | `GET /v1/me/notificaciones` · `POST …/{id}/leer` · `POST …/leer-todas` | Bandeja dentro de la app (§9.3). Leer una notificación en cola evita su push. |
 | `GET /v1/evidencias?parada_id=…` | Evidencias con URL firmada de 5 min |
-| `POST /v1/donaciones/{id}/reasignar` | ADMIN o ASESOR retiran la asignación y reinician la cascada |
+| `POST /v1/donaciones/{id}/reasignar` | ADMIN o ASESOR retiran la asignación y vuelven a ofrecer la donación |
 | `GET /v1/donaciones/{id}/seguimiento` | El donante sigue al voluntario hacia su punto y luego al banco, hasta la entrega (§9.2). De las demás paradas solo recibe cuántas hay antes de su destino |
 | `GET /v1/rutas` · `POST /v1/rutas/{id}/cancelar` · `POST /v1/paradas/{id}/fallida` | Rutas propias; cancelar antes de iniciar; recogida imposible con incidencia |
 | `GET /v1/incidencias/{id}` · `POST …/{id}/revisar` | Detalle y toma de la incidencia por el personal |

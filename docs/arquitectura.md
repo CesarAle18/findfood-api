@@ -346,9 +346,11 @@ Si no queda ningún almacén activo del régimen requerido, la publicación se r
 
 > **Pregunta abierta de modelo.** En la v2 cada `almacen` es a la vez una **sede** (tiene ubicación) y una **cámara** de un solo régimen térmico (tiene `tipo`). Una sede real con bodega seca y cuarto frío tendría que registrarse dos veces con la misma dirección. Y una donación mixta (seca + refrigerada) solo puede tener un destino. Esto funciona si cada sede es de un solo régimen. Si no, conviene separar `sede` y `almacen` antes de cargar datos (§19).
 
-### 6.7 Oferta en cascada y concurrencia
+### 6.7 Oferta simultánea y concurrencia
 
-**Plazos.** Cada oferta vence en `min(ofrecida_at + ASIGNACION_TIMEOUT_MIN, expira_publicacion_at)`. Con 10 y 30 minutos caben tres ofertas completas. Una cuarta, si se crea, vence junto con la publicación: el plazo global siempre manda.
+**Oferta simultánea.** Al publicar, la donación se ofrece al mismo tiempo a todos los voluntarios que pasan los filtros duros (radio máximo de `RADIO_BUSQUEDA_KM_PASOS`, limitado por el radio de cobertura de cada uno). El motor es idempotente: `vencer_ofertas` lo vuelve a ejecutar cada minuto para alcanzar a quienes se habiliten después, y no re-ofrece a quien ya tiene la oferta, la rechazó o la abandonó.
+
+**Plazos.** Todas las ofertas vencen con la publicación (`expira_publicacion_at`). `ASIGNACION_TIMEOUT_MIN` ya no se usa.
 
 **Aceptar** es una sola sentencia condicional dentro de una transacción:
 
@@ -368,9 +370,11 @@ COMMIT;
 **Por qué no hay carreras:**
 - La condición `expira_at > now()` la evalúa la base de datos. Aunque la tarea programada se retrase, una oferta vencida nunca se acepta.
 - Si la tarea programada y la aceptación compiten por la misma fila, el bloqueo de fila hace que una de las dos vea el estado ya cambiado y no haga nada.
-- El índice único parcial `uq_asignacion_vigente` impide a nivel de motor que existan dos ofertas vivas. Si dos procesos intentan crear la siguiente oferta a la vez, uno falla y se descarta sin efecto.
+- La aceptación bloquea la fila de la donación: de dos voluntarios que aceptan a la vez, el segundo ve la donación ya asignada y recibe 409 `oferta-tomada`. El índice único parcial `uq_asignacion_aceptada` lo garantiza a nivel de motor.
+- Al aceptar, las demás ofertas vivas de la donación pasan a CANCELADA y desaparecen de `GET /asignaciones/ofertas` de los otros voluntarios.
+- El índice `uq_asignacion_ofrecida` impide ofertas duplicadas al mismo voluntario si dos procesos ofrecen a la vez; el segundo no hace nada.
 
-**Rechazar** cierra el intento con su motivo y crea **en la misma petición** la oferta al siguiente candidato, sin esperar a la tarea programada. **Abandonar** tras aceptar cierra la asignación (ABANDONADA), devuelve la donación a PUBLICADA si queda plazo y reanuda la cascada. Si la ventana ya no permite otra recogida, abre una incidencia.
+**Rechazar** cierra solo la oferta propia con su motivo; las de los demás voluntarios siguen vivas. **Abandonar** tras aceptar cierra la asignación (ABANDONADA), devuelve la donación a PUBLICADA si queda plazo y la vuelve a ofrecer (sin incluir a quien abandonó). Si la ventana ya no permite otra recogida, abre una incidencia.
 
 ---
 

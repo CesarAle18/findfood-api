@@ -30,8 +30,9 @@ interface Factible {
 /**
  * Motor de asignación (§6): etapa 1 (filtros duros en fn_candidatos_donacion),
  * etapa 2 (Route Matrix sobre los más cercanos, con fallback geodésico),
- * puntaje y oferta en cascada. La invariante "nunca dos ofertas vivas" la
- * garantiza uq_asignacion_vigente: si dos procesos compiten, uno no hace nada.
+ * puntaje y oferta simultánea a todos los voluntarios factibles. El primero en
+ * aceptar se queda la donación (uq_asignacion_aceptada) y las demás ofertas se
+ * cierran; uq_asignacion_ofrecida evita ofertas duplicadas al mismo voluntario.
  */
 @Injectable()
 export class MotorAsignacionService {
@@ -75,12 +76,12 @@ export class MotorAsignacionService {
   }
 
   /**
-   * Ofrece la donación al siguiente candidato. Usa el ranking guardado mientras
-   * sus candidatos sigan cumpliendo los filtros duros; recalcula (con Google)
-   * solo si aparecieron voluntarios factibles que el ranking no conoce.
-   * Devuelve el id de la oferta creada o null.
+   * Ofrece la donación, al mismo tiempo, a todos los voluntarios factibles que
+   * aún no la han recibido. Es idempotente: se puede llamar de nuevo para
+   * alcanzar a quienes entren a su franja o enciendan su disponibilidad.
+   * Devuelve la cantidad de ofertas nuevas.
    */
-  async ofrecerSiguiente(donacionId: string): Promise<string | null> {
+  async ofrecer(donacionId: string): Promise<number> {
     const d = await this.donacion(donacionId);
     if (
       !d ||
@@ -88,20 +89,25 @@ export class MotorAsignacionService {
       !d.expira_publicacion_at ||
       d.expira_publicacion_at.getTime() <= Date.now()
     ) {
-      return null;
+      return 0;
     }
-    const viva = await this.prisma.asignacion.count({
-      where: {
-        donacion_id: donacionId,
-        estado: { in: ['OFRECIDA', 'ACEPTADA'] },
-      },
+    const aceptada = await this.prisma.asignacion.count({
+      where: { donacion_id: donacionId, estado: 'ACEPTADA' },
     });
-    if (viva) return null;
+    if (aceptada) return 0;
 
-    const intentados = new Set(
+    // No se re-ofrece a quien la tiene viva, la rechazó o la abandonó.
+    const excluidos = new Set(
       (
         await this.prisma.asignacion.findMany({
-          where: { donacion_id: donacionId, voluntario_id: { not: null } },
+          where: {
+            donacion_id: donacionId,
+            voluntario_id: { not: null },
+            OR: [
+              { estado: { in: ['OFRECIDA', 'RECHAZADA', 'ABANDONADA'] } },
+              { aceptada_at: { not: null } },
+            ],
+          },
           select: { voluntario_id: true },
         })
       ).map((a) => a.voluntario_id as string),
@@ -109,84 +115,32 @@ export class MotorAsignacionService {
     const pasos = await this.parametros.json<number[]>(
       'RADIO_BUSQUEDA_KM_PASOS',
     );
-    const guardados = await this.prisma.candidato_asignacion.findMany({
-      where: { donacion_id: donacionId },
-      orderBy: { posicion: 'asc' },
-      select: {
-        voluntario_id: true,
-        ofrecido: true,
-        score: true,
-        distancia_km: true,
-      },
-    });
+    const radio = Math.max(...pasos);
+    const minutosVentana = minutosEntre(new Date(), d.ventana_recogida_fin);
+    const factibles = (await this.etapa1(donacionId, radio)).filter(
+      (f) =>
+        !excluidos.has(f.voluntario_id) &&
+        minutosEstimados(f.distancia_km) <= minutosVentana,
+    );
+    if (!factibles.length) return 0;
 
-    let elegido:
-      { voluntarioId: string; score: number; distanciaKm: number } | undefined;
-
-    if (guardados.length) {
-      const factibles = new Map(
-        (await this.etapa1(donacionId, Math.max(...pasos))).map((f) => [
-          f.voluntario_id,
-          f,
-        ]),
-      );
-      const minutosVentana = minutosEntre(new Date(), d.ventana_recogida_fin);
-      const siguiente = guardados.find(
-        (c) =>
-          !c.ofrecido &&
-          !intentados.has(c.voluntario_id) &&
-          factibles.has(c.voluntario_id) &&
-          minutosEstimados(Number(c.distancia_km)) <= minutosVentana,
-      );
-      if (siguiente) {
-        elegido = {
-          voluntarioId: siguiente.voluntario_id,
-          score: Number(siguiente.score),
-          distanciaKm: Number(siguiente.distancia_km),
-        };
-      } else {
-        const conocidos = new Set(guardados.map((g) => g.voluntario_id));
-        const hayNuevos = [...factibles.keys()].some(
-          (v) => !intentados.has(v) && !conocidos.has(v),
-        );
-        if (!hayNuevos) return null;
-      }
-    }
-
-    if (!elegido) {
-      const ranking = await this.clasificar(d, intentados, pasos);
-      if (!ranking.length) return null;
-      await this.guardarRanking(donacionId, ranking);
-      elegido = {
-        voluntarioId: ranking[0].voluntarioId,
-        score: ranking[0].score,
-        distanciaKm: ranking[0].distanciaKm,
-      };
-    }
-    return this.crearOferta(donacionId, elegido);
+    const ranking = await this.clasificar(d, factibles, radio);
+    await this.guardarRanking(donacionId, ranking);
+    return this.crearOfertas(donacionId, ranking);
   }
 
-  /** Etapas 1 y 2 más el puntaje, excluyendo a quienes ya recibieron la oferta. */
+  /** Etapa 2 y puntaje sobre los voluntarios que superaron la etapa 1. */
   async clasificar(
     d: DonacionMotor,
-    excluir: Set<string>,
-    pasos: number[],
+    factibles: Factible[],
+    radio: number,
   ): Promise<CandidatoPuntuado[]> {
-    let radio = pasos[pasos.length - 1];
-    let factibles: Factible[] = [];
-    for (const r of pasos) {
-      factibles = (await this.etapa1(d.id, r)).filter(
-        (f) => !excluir.has(f.voluntario_id),
-      );
-      radio = r;
-      if (factibles.length) break;
-    }
-    if (!factibles.length) return [];
-
+    const ordenados = [...factibles].sort(
+      (a, b) => a.distancia_km - b.distancia_km,
+    );
     const maximo = await this.parametros.entero('MAX_CANDIDATOS_MATRIX');
-    const cercanos = factibles
-      .sort((a, b) => a.distancia_km - b.distancia_km)
-      .slice(0, Math.max(1, maximo));
+    // Google solo para los más cercanos; el resto usa la distancia geodésica.
+    const cercanos = ordenados.slice(0, Math.max(1, maximo));
     const ids = cercanos.map((c) => c.voluntario_id);
 
     const coordenadas = await this.prisma.$queryRaw<
@@ -202,6 +156,7 @@ export class MotorAsignacionService {
         ? await this.google.matriz(origenes, [{ lat: d.lat, lng: d.lng }])
         : null;
 
+    const todosIds = ordenados.map((c) => c.voluntario_id);
     const historial = await this.prisma.$queryRaw<
       { voluntario_id: string; completadas: number; aceptadas: number }[]
     >`
@@ -209,13 +164,13 @@ export class MotorAsignacionService {
              count(*) FILTER (WHERE estado = 'COMPLETADA')::int AS completadas,
              count(*) FILTER (WHERE estado IN ('COMPLETADA','ABANDONADA'))::int AS aceptadas
         FROM asignacion
-       WHERE voluntario_id = ANY(${ids}::uuid[])
+       WHERE voluntario_id = ANY(${todosIds}::uuid[])
        GROUP BY voluntario_id`;
 
     const pesos = await this.parametros.pesosPuntaje();
     return puntuarCandidatos(
-      cercanos.map((c, i) => {
-        const tramo = matriz?.[i]?.[0];
+      ordenados.map((c, i) => {
+        const tramo = i < cercanos.length ? matriz?.[i]?.[0] : undefined;
         const h = historial.find((x) => x.voluntario_id === c.voluntario_id);
         return {
           voluntarioId: c.voluntario_id,
@@ -270,81 +225,93 @@ export class MotorAsignacionService {
   }
 
   /**
-   * Crea la oferta con plazo min(ahora + ASIGNACION_TIMEOUT_MIN, expira_publicacion_at)
-   * (§6.7) y encola el aviso al voluntario, todo en una transacción.
+   * Crea una oferta por candidato, todas con plazo expira_publicacion_at, y
+   * encola el aviso a cada voluntario, en una transacción. Bloquea la donación
+   * para serializar con otros procesos de oferta y con las aceptaciones.
    */
-  private async crearOferta(
+  private async crearOfertas(
     donacionId: string,
-    c: { voluntarioId: string; score: number; distanciaKm: number },
-  ): Promise<string | null> {
+    candidatos: CandidatoPuntuado[],
+  ): Promise<number> {
     try {
       return await this.prisma.transaccion(async (tx) => {
-        const timeout = await this.parametros.entero('ASIGNACION_TIMEOUT_MIN');
-        const [oferta] = await tx.$queryRaw<
-          { id: string; expira_at: Date; intento: number }[]
-        >`
-          INSERT INTO asignacion
-            (donacion_id, voluntario_id, intento, estado, score, distancia_km, ofrecida_at, expira_at)
-          SELECT d.id, ${c.voluntarioId}::uuid,
-                 coalesce((SELECT max(intento) FROM asignacion WHERE donacion_id = d.id), 0) + 1,
-                 'OFRECIDA', ${c.score}::numeric, ${Math.round(c.distanciaKm * 100) / 100}::numeric,
-                 now(),
-                 least(now() + make_interval(mins => ${timeout}::int), d.expira_publicacion_at)
-            FROM donacion d
-           WHERE d.id = ${donacionId}::uuid
-             AND d.estado = 'PUBLICADA'
-             AND d.expira_publicacion_at > now() + interval '1 minute'
-          RETURNING id, expira_at, intento`;
-        if (!oferta) return null;
+        const [d] = await tx.$queryRaw<{ id: string }[]>`
+          SELECT id FROM donacion
+           WHERE id = ${donacionId}::uuid
+             AND estado = 'PUBLICADA'
+             AND expira_publicacion_at > now() + interval '1 minute'
+             AND NOT EXISTS (SELECT 1 FROM asignacion
+                              WHERE donacion_id = ${donacionId}::uuid AND estado = 'ACEPTADA')
+           FOR UPDATE`;
+        if (!d) return 0;
 
-        await tx.candidato_asignacion.updateMany({
-          where: { donacion_id: donacionId, voluntario_id: c.voluntarioId },
-          data: { ofrecido: true },
-        });
-        await this.trazabilidad.registrar(tx, {
-          ambito: 'ASIGNACION',
-          entidad: { asignacionId: oferta.id },
-          nuevo: 'OFRECIDA',
-          metadata: {
-            intento: oferta.intento,
-            score: c.score,
-            distancia_km: c.distanciaKm,
-          },
-        });
-        const voluntario = await tx.voluntario.findUniqueOrThrow({
-          where: { id: c.voluntarioId },
-          select: { usuario_id: true },
-        });
-        await this.notificaciones.encolar(tx, {
-          usuarioId: voluntario.usuario_id,
-          codigo: 'ASIGNACION_OFRECIDA',
-          donacionId,
-          asignacionId: oferta.id,
-          variables: {
-            minutos: Math.max(
-              1,
-              Math.round(minutosEntre(new Date(), oferta.expira_at)),
-            ),
-          },
-          data: { expira_at: oferta.expira_at.toISOString() },
-        });
-        return oferta.id;
+        let creadas = 0;
+        for (const c of candidatos) {
+          const [oferta] = await tx.$queryRaw<
+            { id: string; expira_at: Date; intento: number }[]
+          >`
+            INSERT INTO asignacion
+              (donacion_id, voluntario_id, intento, estado, score, distancia_km, ofrecida_at, expira_at)
+            SELECT d.id, ${c.voluntarioId}::uuid,
+                   coalesce((SELECT max(intento) FROM asignacion WHERE donacion_id = d.id), 0) + 1,
+                   'OFRECIDA', ${c.score}::numeric, ${Math.round(c.distanciaKm * 100) / 100}::numeric,
+                   now(), d.expira_publicacion_at
+              FROM donacion d
+             WHERE d.id = ${donacionId}::uuid
+            ON CONFLICT (donacion_id, voluntario_id) WHERE estado = 'OFRECIDA' DO NOTHING
+            RETURNING id, expira_at, intento`;
+          if (!oferta) continue;
+          creadas++;
+
+          await tx.candidato_asignacion.updateMany({
+            where: { donacion_id: donacionId, voluntario_id: c.voluntarioId },
+            data: { ofrecido: true },
+          });
+          await this.trazabilidad.registrar(tx, {
+            ambito: 'ASIGNACION',
+            entidad: { asignacionId: oferta.id },
+            nuevo: 'OFRECIDA',
+            metadata: {
+              intento: oferta.intento,
+              score: c.score,
+              distancia_km: c.distanciaKm,
+            },
+          });
+          const voluntario = await tx.voluntario.findUniqueOrThrow({
+            where: { id: c.voluntarioId },
+            select: { usuario_id: true },
+          });
+          await this.notificaciones.encolar(tx, {
+            usuarioId: voluntario.usuario_id,
+            codigo: 'ASIGNACION_OFRECIDA',
+            donacionId,
+            asignacionId: oferta.id,
+            variables: {
+              minutos: Math.max(
+                1,
+                Math.round(minutosEntre(new Date(), oferta.expira_at)),
+              ),
+            },
+            data: { expira_at: oferta.expira_at.toISOString() },
+          });
+        }
+        return creadas;
       });
     } catch (err) {
-      // Otro proceso creó la oferta a la vez: se descarta sin efecto (§6.7).
+      // Otro proceso creó las mismas ofertas a la vez: se descarta sin efecto.
       if (
-        violaUnicidad(err, 'uq_asignacion_vigente') ||
+        violaUnicidad(err, 'uq_asignacion_ofrecida') ||
         violaUnicidad(err, 'uq_asignacion_intento')
       ) {
-        return null;
+        return 0;
       }
       throw err;
     }
   }
 
   /**
-   * Tarea vencer_ofertas (§7): OFRECIDA vencida → EXPIRADA y oferta al siguiente;
-   * además reintenta las publicadas que no tienen oferta viva.
+   * Tarea vencer_ofertas (§7): OFRECIDA vencida → EXPIRADA; además reofrece las
+   * publicadas sin aceptar, para alcanzar a voluntarios que se hayan habilitado.
    */
   async vencerOfertas(
     lote = 200,
@@ -377,17 +344,17 @@ export class MotorAsignacionService {
        WHERE d.estado = 'PUBLICADA'
          AND d.expira_publicacion_at > now() + interval '1 minute'
          AND NOT EXISTS (SELECT 1 FROM asignacion a
-                          WHERE a.donacion_id = d.id AND a.estado IN ('OFRECIDA','ACEPTADA'))
+                          WHERE a.donacion_id = d.id AND a.estado = 'ACEPTADA')
        ORDER BY d.score_urgencia DESC NULLS LAST, d.ventana_recogida_fin
        LIMIT 50`;
     let ofertas = 0;
     for (const { id } of pendientes) {
       try {
-        if (await this.ofrecerSiguiente(id)) ofertas++;
+        ofertas += await this.ofrecer(id);
       } catch (err) {
         this.logger.error(
           { err, donacionId: id },
-          'Falló la cascada de una donación',
+          'Falló la oferta de una donación',
         );
       }
     }
