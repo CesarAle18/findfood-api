@@ -154,6 +154,36 @@ export class SolicitudVoluntarioDto {
   @ApiPropertyOptional() @IsOptional() @IsString() selfie?: string;
 }
 
+/**
+ * Lo que el voluntario aprobado cambia por su cuenta. Vehículo, placa y
+ * capacidad no están: los verificó el administrador, y el pipe global
+ * rechaza con 400 cualquier campo que no esté aquí (forbidNonWhitelisted).
+ */
+export class ActualizarVoluntarioDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  tiene_refrigeracion?: boolean;
+
+  @ApiPropertyOptional({
+    type: CoordenadaDto,
+    description:
+      'Punto desde el que suele salir; debe estar en Bogotá o un municipio vecino',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CoordenadaDto)
+  @DentroDeZonaServicio()
+  ubicacion_base?: CoordenadaDto;
+
+  @ApiPropertyOptional({ minimum: 1, maximum: 100 })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  @Max(100)
+  radio_cobertura_km?: number;
+}
+
 const HORA = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 export class FranjaDto {
