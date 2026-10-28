@@ -22,6 +22,7 @@ import {
 import type { UsuarioAutenticado } from '../../comun/auth/tipos';
 import {
   ActualizarPerfilDto,
+  ActualizarVoluntarioDto,
   DisponibilidadDto,
   EstadoVoluntarioDto,
   RegistrarDispositivoDto,
@@ -93,6 +94,15 @@ export class VoluntarioController {
     @Req() peticion: Request,
   ) {
     return this.voluntarios.solicitar(usuario, dto, peticion);
+  }
+
+  @Patch('perfil')
+  @Roles('VOLUNTARIO')
+  actualizarPerfil(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Body() dto: ActualizarVoluntarioDto,
+  ) {
+    return this.voluntarios.actualizarPerfil(usuario, dto);
   }
 
   @Put('disponibilidad')

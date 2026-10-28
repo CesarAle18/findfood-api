@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import type { Request } from 'express';
 import type { UsuarioAutenticado } from '../../comun/auth/tipos';
 import { violaUnicidad } from '../../comun/http/errores-pg';
@@ -9,10 +9,12 @@ import { fechaBogota, horaComoDate } from '../../comun/tiempo';
 import { TrazabilidadService } from '../../comun/trazabilidad/trazabilidad.service';
 import { ArchivosService } from '../evidencias/archivos.service';
 import type {
+  ActualizarVoluntarioDto,
   DisponibilidadDto,
   SolicitudVoluntarioDto,
   UbicacionVoluntarioDto,
 } from './identidad.dto';
+import { IdentidadService } from './identidad.service';
 
 const EDAD_MINIMA = 18;
 
@@ -29,6 +31,7 @@ export class VoluntarioService {
     private readonly prisma: PrismaService,
     private readonly archivos: ArchivosService,
     private readonly trazabilidad: TrazabilidadService,
+    private readonly identidad: IdentidadService,
   ) {}
 
   /** Perfil de voluntario APROBADO del usuario (el rol VOLUNTARIO ya lo exige el guard). */
@@ -212,6 +215,47 @@ export class VoluntarioService {
       }
       throw err;
     }
+  }
+
+  /**
+   * PATCH /v1/voluntario/perfil: cadena de frío y zona de operación (ubicación
+   * base + radio). No toca el vehículo ni la verificación. Responde /v1/me.
+   */
+  async actualizarPerfil(
+    usuario: UsuarioAutenticado,
+    dto: ActualizarVoluntarioDto,
+  ) {
+    const { tiene_refrigeracion, ubicacion_base, radio_cobertura_km } = dto;
+    if (
+      tiene_refrigeracion == null &&
+      ubicacion_base == null &&
+      radio_cobertura_km == null
+    ) {
+      // Un arreglo de mensajes: el filtro global lo responde como `validacion`.
+      throw new BadRequestException([
+        'Envía al menos uno de: tiene_refrigeracion, ubicacion_base, radio_cobertura_km',
+      ]);
+    }
+
+    const voluntario = await this.propio(usuario.id);
+    await this.prisma.transaccion(async (tx) => {
+      if (tiene_refrigeracion != null || radio_cobertura_km != null) {
+        await tx.voluntario.update({
+          where: { id: voluntario.id },
+          data: {
+            ...(tiene_refrigeracion != null ? { tiene_refrigeracion } : {}),
+            ...(radio_cobertura_km != null ? { radio_cobertura_km } : {}),
+          },
+        });
+      }
+      // Columna geography (Unsupported en Prisma): va por SQL.
+      if (ubicacion_base) {
+        await tx.$executeRaw`
+          UPDATE voluntario SET ubicacion_base = ${sqlPunto(ubicacion_base)}
+           WHERE id = ${voluntario.id}::uuid`;
+      }
+    });
+    return this.identidad.perfil(usuario);
   }
 
   /** Reemplaza las franjas: sin DELETE (ADR-10), las anteriores quedan inactivas. */
