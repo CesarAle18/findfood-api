@@ -591,7 +591,7 @@ Todas las rutas usan JSON, exigen JWT (salvo las indicadas) y devuelven errores 
 |---|---|---|
 | `POST /v1/rutas` · `GET /v1/rutas/{id}` | VOLUNTARIO, ASESOR_BANCO | Agrupar y ordenar (§8.1–8.2) |
 | `POST /v1/rutas/{id}/iniciar` | VOLUNTARIO | PLANIFICADA → EN_CURSO |
-| `POST /v1/paradas/{id}/llegada` · `POST /v1/paradas/{id}/confirmar` | VOLUNTARIO (ASESOR_BANCO en la ENTREGA) | §8.3. Idempotentes. |
+| `POST /v1/paradas/{id}/llegada` · `POST /v1/paradas/{id}/confirmar` | VOLUNTARIO (ASESOR_BANCO en la ENTREGA) | §8.3. Idempotentes. La llegada exige `ubicacion` a ≤ 1 km de la parada (422 `ubicacion-requerida` / `fuera-de-radio`); el asesor en la ENTREGA queda exento. |
 | `POST /v1/evidencias/upload-url` · `POST /v1/evidencias` | cualquier rol operativo | §8.5 |
 | `POST /v1/incidencias` · `GET /v1/incidencias` · `POST /v1/incidencias/{id}/resolver` | reportar: todos; resolver: ADMIN | Tipos como donante ausente o alimento en mal estado. Algunas bloquean la donación (`tipo_incidencia.bloquea_donacion`). |
 

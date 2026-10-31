@@ -129,6 +129,9 @@ export function distanciaKm(a: Coordenada, b: Coordenada): number {
   return 2 * RADIO_TIERRA_KM * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
+/** Radio (m) dentro del cual se puede registrar la llegada a una parada; la app usa el mismo número. */
+export const RADIO_LLEGADA_M = 1000;
+
 /** Velocidad urbana de referencia en Bogotá para el fallback sin Google (§6.3). */
 export const VELOCIDAD_URBANA_KMH = 20;
 

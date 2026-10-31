@@ -9,6 +9,7 @@ import {
   type Coordenada,
   distanciaKm,
   minutosEstimados,
+  RADIO_LLEGADA_M,
   sqlPuntoOpcional,
 } from '../../comun/geo';
 import { GoogleRoutesService } from '../../comun/google/google-routes.service';
@@ -80,6 +81,8 @@ interface ParadaBloqueada extends RutaBloqueada {
   parada_estado: string;
   donacion_id: string | null;
   confirmada_por: string | null;
+  lat: number;
+  lng: number;
 }
 
 @Injectable()
@@ -556,6 +559,7 @@ export class RuteoService {
     const [p] = await tx.$queryRaw<ParadaBloqueada[]>`
       SELECT p.id AS parada_id, p.ruta_id, p.tipo::text AS tipo, p.estado::text AS parada_estado,
              p.donacion_id, p.confirmada_por,
+             ST_Y(p.ubicacion::geometry) AS lat, ST_X(p.ubicacion::geometry) AS lng,
              r.id, r.estado::text AS estado, r.voluntario_id, v.usuario_id AS voluntario_usuario_id,
              r.banco_ejecutor_id, r.iniciada_at
         FROM parada_ruta p
@@ -628,6 +632,27 @@ export class RuteoService {
     return this.detalle(usuario, id);
   }
 
+  /**
+   * La llegada exige ubicación a no más de RADIO_LLEGADA_M de la parada; el asesor
+   * que la registra desde el panel en la ENTREGA queda exento.
+   */
+  private exigirCercania(p: ParadaBloqueada, ubicacion?: Coordenada): void {
+    if (!ubicacion) {
+      throw noProcesable(
+        'ubicacion-requerida',
+        'Activa la ubicación para registrar la llegada',
+      );
+    }
+    const metros = distanciaKm(ubicacion, { lat: p.lat, lng: p.lng }) * 1000;
+    if (metros > RADIO_LLEGADA_M) {
+      throw noProcesable(
+        'fuera-de-radio',
+        `Debes estar a menos de ${RADIO_LLEGADA_M / 1000} km de la parada para registrar la llegada`,
+        `Distancia: ${Math.round(metros)} m`,
+      );
+    }
+  }
+
   /** Idempotente: repetir la llegada devuelve la parada sin cambios (§8.4). */
   async llegada(
     usuario: UsuarioAutenticado,
@@ -652,6 +677,11 @@ export class RuteoService {
           `Estado: ${p.parada_estado}`,
         );
       }
+      const asesorEnBanco =
+        p.tipo === 'ENTREGA' &&
+        tieneRol(usuario, 'ASESOR_BANCO') &&
+        p.voluntario_usuario_id !== usuario.id;
+      if (!asesorEnBanco) this.exigirCercania(p, dto.ubicacion);
       await tx.parada_ruta.update({
         where: { id: paradaId },
         data: { estado: 'EN_SITIO', hora_real_llegada: new Date() },

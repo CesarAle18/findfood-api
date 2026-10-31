@@ -243,6 +243,19 @@ describe('Flujo completo de una donación', () => {
       .como(voluntarioAsignado)
       .post(`/v1/rutas/${rutaId}/iniciar`)
       .expect(200);
+    // La llegada exige ubicación a 1 km o menos de la parada.
+    const sinUbicacion = await ctx
+      .como(voluntarioAsignado)
+      .post(`/v1/paradas/${recogidaId}/llegada`)
+      .send({})
+      .expect(422);
+    expect(sinUbicacion.body.type).toBe('ubicacion-requerida');
+    const lejos = await ctx
+      .como(voluntarioAsignado)
+      .post(`/v1/paradas/${recogidaId}/llegada`)
+      .send({ ubicacion: { lat: ZONA.lat + 0.05, lng: ZONA.lng } })
+      .expect(422);
+    expect(lejos.body.type).toBe('fuera-de-radio');
     await ctx
       .como(voluntarioAsignado)
       .post(`/v1/paradas/${recogidaId}/llegada`)

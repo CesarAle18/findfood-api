@@ -55,7 +55,11 @@ export class ListarRutasDto extends PaginacionDto {
 }
 
 export class LlegadaParadaDto {
-  @ApiPropertyOptional({ type: CoordenadaDto })
+  @ApiPropertyOptional({
+    type: CoordenadaDto,
+    description:
+      'Obligatoria para quien ejecuta la ruta: debe estar a 1 km o menos de la parada.',
+  })
   @IsOptional()
   @ValidateNested()
   @Type(() => CoordenadaDto)
