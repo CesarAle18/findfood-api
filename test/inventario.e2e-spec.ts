@@ -233,6 +233,52 @@ describe('Inventario', () => {
       .expect(409);
   });
 
+  it('vencer lotes: la fecha cumplida pasa a VENCIDO conservando el saldo, y es idempotente', async () => {
+    const vencido = await loteDePrueba(7, enDias(-1), 3);
+    const hoy = await loteDePrueba(4, enDias(0), 3);
+    const servicio = ctx.app.get(LotesService);
+
+    expect(await servicio.vencerLotes()).toBeGreaterThanOrEqual(1);
+    expect(await servicio.vencerLotes()).toBe(0);
+
+    const { rows } = await ctx.sql.query<{
+      id: string;
+      estado: string;
+      cantidad_disponible: string;
+    }>(
+      `SELECT id, estado::text, cantidad_disponible FROM lote_inventario WHERE id = ANY($1::uuid[])`,
+      [[vencido, hoy]],
+    );
+    const por = (id: string) => rows.find((l) => l.id === id);
+    expect(por(vencido)).toMatchObject({
+      estado: 'VENCIDO',
+      cantidad_disponible: '7.00',
+    });
+    expect(por(hoy)?.estado).toBe('DISPONIBLE');
+
+    const historial = await ctx.sql.query(
+      `SELECT estado_anterior, usuario_id FROM historial_estado
+        WHERE lote_id = $1 AND estado_nuevo = 'VENCIDO'`,
+      [vencido],
+    );
+    expect(historial.rows).toEqual([
+      { estado_anterior: 'DISPONIBLE', usuario_id: null },
+    ]);
+    const alertas = await ctx.sql.query(
+      `SELECT 1 FROM alerta_inventario
+        WHERE lote_id = $1 AND tipo = 'VENCIDO' AND atendida_at IS NULL`,
+      [vencido],
+    );
+    expect(alertas.rowCount).toBe(1);
+
+    const cerrado = await ctx
+      .como(asesor)
+      .post(`/v1/inventario/lotes/${vencido}/ajuste`)
+      .send({ tipo: 'AJUSTE', cantidad: 1, motivo: 'Reconteo' })
+      .expect(409);
+    expect(cerrado.body.type).toBe('lote-cerrado');
+  });
+
   it('recepción parcial: solo los productos aceptados generan lote y se registra el peso rechazado', async () => {
     const donante = await ctx.cuenta();
     const d = await ctx

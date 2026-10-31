@@ -101,6 +101,12 @@ export class TareasService {
     );
   }
 
+  /** Lotes con la fecha de vencimiento cumplida pasan a VENCIDO. */
+  @Cron('5 0 * * *', { name: 'vencer_lotes', timeZone: ZONA_HORARIA })
+  vencerLotes() {
+    return this.ejecutar('vencer_lotes', () => this.lotes.vencerLotes());
+  }
+
   @Cron('0 6 * * *', { name: 'alertas_vencimiento', timeZone: ZONA_HORARIA })
   alertasVencimiento() {
     return this.ejecutar('alertas_vencimiento', () =>

@@ -91,6 +91,7 @@ export class AlmacenesService {
     const datos: Prisma.almacenUpdateInput = {
       ...(dto.activo !== undefined ? { activo: dto.activo } : {}),
       ...(dto.nombre !== undefined ? { nombre: dto.nombre } : {}),
+      ...(dto.tipo !== undefined ? { tipo: dto.tipo } : {}),
       ...(dto.capacidad_kg !== undefined
         ? { capacidad_kg: dto.capacidad_kg }
         : {}),
@@ -105,6 +106,7 @@ export class AlmacenesService {
         anteriores: {
           activo: actual.activo,
           nombre: actual.nombre,
+          tipo: actual.tipo,
           capacidad_kg: actual.capacidad_kg,
         },
         nuevos: dto,

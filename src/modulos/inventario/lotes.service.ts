@@ -305,28 +305,79 @@ export class LotesService {
            AND l.fecha_vencimiento <= ${hoy}::date + ${dias}::int
         ON CONFLICT (lote_id, tipo) WHERE atendida_at IS NULL AND lote_id IS NOT NULL DO NOTHING
         RETURNING id`;
-      if (nuevas.length) {
-        const asesores = await tx.usuario.findMany({
-          where: {
-            estado: 'ACTIVO',
-            deleted_at: null,
-            usuario_rol_usuario_rol_usuario_idTousuario: {
-              some: { activo: true, rol: { codigo: 'ASESOR_BANCO' } },
-            },
-          },
-          select: { id: true },
-        });
-        await this.notificaciones.encolarVarias(
-          tx,
-          asesores.map((a) => ({
-            usuarioId: a.id,
-            codigo: 'ALERTA_VENCIMIENTO' as const,
-            variables: { cantidad: nuevas.length },
-          })),
-        );
-      }
+      await this.avisarAsesores(tx, nuevas.length);
       return nuevas.length;
     });
+  }
+
+  /**
+   * Tarea vencer_lotes (§7): lote con la fecha de vencimiento cumplida pasa a
+   * VENCIDO. El saldo se conserva (cuánto se perdió) y el libro mayor no
+   * cambia; mover() ya rechaza movimientos sobre un lote VENCIDO.
+   */
+  async vencerLotes(lote = 500): Promise<number> {
+    const hoy = fechaBogota();
+    return this.prisma.transaccion(async (tx) => {
+      const vencidos = await tx.$queryRaw<{ id: string; estado: string }[]>`
+        SELECT id, estado::text AS estado FROM lote_inventario
+         WHERE estado IN ('DISPONIBLE','RESERVADO')
+           AND fecha_vencimiento < ${hoy}::date
+         ORDER BY fecha_vencimiento
+         LIMIT ${lote}
+         FOR UPDATE SKIP LOCKED`;
+      if (!vencidos.length) return 0;
+      const ids = vencidos.map((l) => l.id);
+      await tx.$executeRaw`
+        UPDATE lote_inventario SET estado = 'VENCIDO', updated_at = now()
+         WHERE id = ANY(${ids}::uuid[])`;
+      for (const l of vencidos) {
+        await this.trazabilidad.registrar(tx, {
+          ambito: 'LOTE',
+          entidad: { loteId: l.id },
+          anterior: l.estado,
+          nuevo: 'VENCIDO',
+          motivo: 'Fecha de vencimiento cumplida',
+        });
+      }
+      const alertas = await tx.$queryRaw<{ id: string }[]>`
+        INSERT INTO alerta_inventario (banco_id, lote_id, tipo, nivel, dias_para_vencer, mensaje)
+        SELECT l.banco_id, l.id, 'VENCIDO', 'ALTA'::severidad,
+               (l.fecha_vencimiento - ${hoy}::date)::smallint,
+               format('Lote %s (%s, %s %s) en %s venció el %s: retirarlo del almacén',
+                      l.codigo_lote, ta.nombre, l.cantidad_disponible, um.codigo, a.nombre,
+                      to_char(l.fecha_vencimiento, 'YYYY-MM-DD'))
+          FROM lote_inventario l
+          JOIN tipo_alimento ta ON ta.id = l.tipo_alimento_id
+          JOIN unidad_medida um ON um.id = l.unidad_medida_id
+          JOIN almacen a ON a.id = l.almacen_id
+         WHERE l.id = ANY(${ids}::uuid[])
+        ON CONFLICT (lote_id, tipo) WHERE atendida_at IS NULL AND lote_id IS NOT NULL DO NOTHING
+        RETURNING id`;
+      await this.avisarAsesores(tx, alertas.length);
+      return vencidos.length;
+    });
+  }
+
+  private async avisarAsesores(tx: Tx, cantidad: number): Promise<void> {
+    if (!cantidad) return;
+    const asesores = await tx.usuario.findMany({
+      where: {
+        estado: 'ACTIVO',
+        deleted_at: null,
+        usuario_rol_usuario_rol_usuario_idTousuario: {
+          some: { activo: true, rol: { codigo: 'ASESOR_BANCO' } },
+        },
+      },
+      select: { id: true },
+    });
+    await this.notificaciones.encolarVarias(
+      tx,
+      asesores.map((a) => ({
+        usuarioId: a.id,
+        codigo: 'ALERTA_VENCIMIENTO' as const,
+        variables: { cantidad },
+      })),
+    );
   }
 
   listarAlertas(soloAbiertas: boolean) {

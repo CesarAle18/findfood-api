@@ -57,6 +57,12 @@ export class ActualizarAlmacenDto {
   @MinLength(2)
   @MaxLength(80)
   nombre?: string;
+
+  @ApiPropertyOptional({ enum: tipo_almacenamiento })
+  @IsOptional()
+  @IsIn(Object.values(tipo_almacenamiento))
+  tipo?: tipo_almacenamiento;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsNumber()
