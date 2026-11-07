@@ -664,6 +664,22 @@ export class RuteoService {
         usuarioId: usuario.id,
         ubicacion: dto.ubicacion,
       });
+      // Solo la llegada real a una recogida avisa al donante; la sede no.
+      if (p.tipo === 'RECOGIDA' && p.donacion_id) {
+        const donacion = await this.donaciones.bloquear(tx, p.donacion_id);
+        await this.notificaciones.encolar(tx, {
+          usuarioId: donacion!.donante_usuario_id,
+          codigo: 'VOLUNTARIO_EN_SITIO',
+          donacionId: p.donacion_id,
+          // exigirEjecutor ya garantizó quién llega: en la flota, el personal
+          // (el colector es el banco, como en ASIGNACION_ACEPTADA); si no, el voluntario.
+          variables: {
+            voluntario: p.banco_ejecutor_id
+              ? 'El banco de alimentos'
+              : usuario.nombres,
+          },
+        });
+      }
     });
     return this.parada(paradaId);
   }
