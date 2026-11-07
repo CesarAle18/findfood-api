@@ -39,14 +39,15 @@ Payload contract v1: `{ v: 1, entidad: 'donacion'|'asignacion'|'parada'|'ruta'|'
 ## Tasks
 | ID | Task | Route | Status | Commit | Review |
 |---|---|---|---|---|---|
-| API-0 | Baseline: lint, typecheck, unit, full e2e; record pre-existing failures | delegated verification worker | [ ] | — | — |
+| API-0 | Baseline: lint, typecheck, unit, full e2e; record pre-existing failures | delegated verification worker + parent e2e run | [x] | — (no code) | n/a |
 | API-1 | Channel + authorization migration (`fn_rt_usuario_id`, `fn_rt_es_usuario_activo`, `pol_rt_usuario_leer`, `fn_rt_sincronizar`), `test/sincronizacion.e2e-spec.ts` policy cases, `docs/arquitectura.md` §19 + record 05 addendum | delegated writer (2+ non-trivial files) | [ ] | — | — |
 | API-2 | Flow triggers (`donacion`, `asignacion`, `parada_ruta`, `ruta`) + e2e flow cases | delegated writer | [ ] | — | — |
 | API-3 | Account + inbox triggers (`notificacion`, `usuario`, `usuario_rol`, `voluntario`) + negative/positive e2e | delegated writer | [ ] | — | — |
 | API-4 | Missing notices N1–N7 (catalog migration, `encolar` calls, unit + e2e, docs); read-only web inbox check for unknown `tipo` | delegated writer | [ ] | — | — |
 
 ## Progress
-- 2026-11-07: plan approved; branch created; feature document created.
+- 2026-11-07: plan approved; branch created; feature document created (`684f9cb`).
+- 2026-11-07: API-0 baseline @ `c0ab0c0`: `npm run lint` exit 0 (2 pre-existing warnings: unused `Prisma` import in `src/modulos/asignacion/rutas-dinamicas.service.ts:2`, `.sort()` without compare in `test/asignacion.e2e-spec.ts:306`); `npm run typecheck` exit 0; `npm test` 16/16 suites, 132/132; `npm run db:local:reiniciar` + `npm run test:e2e` 12/12 suites, 126/126 (needs the Docker Desktop engine running). No pre-existing failures.
 
 ## Next step
-API-0 baseline.
+API-1 channel + authorization.
