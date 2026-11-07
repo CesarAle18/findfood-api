@@ -199,6 +199,49 @@ describe('Asignación', () => {
         }
       }
     });
+
+    it('una donación seca prefiere la sede seca aunque la refrigerada esté más cerca', async () => {
+      const donante = await ctx.cuenta();
+      const id = await crearDonacion(donante, {
+        ubicacion: { lat: ZONA.lat - 0.01, lng: ZONA.lng - 0.01 },
+      });
+      const d = await publicar(donante, id);
+      expect(d.requiere_refrigeracion).toBe(false);
+      expect(d.almacen_destino.id).toBe(sedes.seco);
+    });
+
+    it('sin sede seca activa, una donación seca va a la sede refrigerada', async () => {
+      const { body: sedesActivas } = await ctx
+        .como(asesor)
+        .get('/v1/almacenes')
+        .expect(200);
+      const secas = sedesActivas.filter(
+        (s: { tipo: string; activo: boolean }) =>
+          s.tipo === 'SECO' && s.activo,
+      );
+      for (const s of secas) {
+        await ctx
+          .como(asesor)
+          .patch(`/v1/almacenes/${s.id}`)
+          .send({ activo: false })
+          .expect(200);
+      }
+      try {
+        const donante = await ctx.cuenta();
+        const id = await crearDonacion(donante);
+        const d = await publicar(donante, id);
+        expect(d.requiere_refrigeracion).toBe(false);
+        expect(d.almacen_destino.id).toBe(sedes.refrigerado);
+      } finally {
+        for (const s of secas) {
+          await ctx
+            .como(asesor)
+            .patch(`/v1/almacenes/${s.id}`)
+            .send({ activo: true })
+            .expect(200);
+        }
+      }
+    });
   });
 
   describe('Plazos y oferta simultánea', () => {

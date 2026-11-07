@@ -823,7 +823,8 @@ export class DonacionesService {
         ahora,
       });
 
-      // §6.6: la sede activa más cercana del régimen térmico requerido.
+      // §6.6: la sede activa más cercana del régimen requerido. Lo seco cae en una
+      // sede refrigerada solo si no hay sede seca activa; lo refrigerado nunca va a una seca.
       const regimen = agregados.requiere_refrigeracion ? 'REFRIGERADO' : 'SECO';
       const [almacen] = await tx.$queryRaw<{ id: string }[]>`
         SELECT a.id
@@ -831,13 +832,16 @@ export class DonacionesService {
           JOIN banco_alimentos b ON b.id = a.banco_id
           JOIN donacion d ON d.id = ${id}::uuid
          WHERE a.activo AND b.activo AND b.deleted_at IS NULL
-           AND a.tipo = ${regimen}::tipo_almacenamiento
-         ORDER BY ST_Distance(a.ubicacion, d.ubicacion_recogida)
+           AND (a.tipo = ${regimen}::tipo_almacenamiento OR a.tipo = 'REFRIGERADO')
+         ORDER BY a.tipo = ${regimen}::tipo_almacenamiento DESC,
+                  ST_Distance(a.ubicacion, d.ubicacion_recogida)
          LIMIT 1`;
       if (!almacen) {
         throw conflicto(
           'sin-almacen-disponible',
-          `No hay una sede ${regimen === 'REFRIGERADO' ? 'refrigerada' : 'seca'} activa que pueda recibir la donación`,
+          regimen === 'REFRIGERADO'
+            ? 'No hay una sede refrigerada activa que pueda recibir la donación'
+            : 'No hay una sede activa que pueda recibir la donación',
         );
       }
 

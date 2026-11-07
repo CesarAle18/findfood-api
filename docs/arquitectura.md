@@ -334,8 +334,9 @@ Los coeficientes son un punto de partida y deben validarse con el banco. Si no h
 
 1. Se toman los almacenes activos cuyo `tipo` corresponde al régimen de la donación. **Solo existen dos regímenes: SECO y REFRIGERADO** (decisión del equipo; el DDL v3 no admite CONGELADO). Si algún producto requiere refrigeración (`donacion.requiere_refrigeracion`), la donación va a un almacén REFRIGERADO; si no, a uno SECO.
 2. Entre ellos, gana el más cercano al punto de recogida.
+3. Una sede REFRIGERADO también recibe productos secos: si no hay ningún almacén SECO activo, la donación seca va al REFRIGERADO activo más cercano. Lo contrario no ocurre: una sede SECO nunca recibe una donación refrigerada.
 
-Si no queda ningún almacén activo del régimen requerido, la publicación se rechaza con `409 sin-almacen-disponible`. Así el donante se entera en el momento y no cuando nadie pueda recibir la donación.
+Si no queda ningún almacén activo que pueda recibirla, la publicación se rechaza con `409 sin-almacen-disponible`. Así el donante se entera en el momento y no cuando nadie pueda recibir la donación.
 
 **El sistema no calcula la capacidad libre de los almacenes.** La gestionan las personas del banco de alimentos:
 - Cuando una sede está llena, un asesor la desactiva (`almacen.activo = false`) con `PATCH /v1/almacenes/{id}`, y el motor deja de dirigirle donaciones. Al liberarse espacio, la reactiva.
