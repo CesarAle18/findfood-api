@@ -295,14 +295,40 @@ export class ContextoPruebas {
   async voluntario(
     admin: Cuenta,
     base: { lat: number; lng: number },
-    extra: Partial<{
-      capacidad_carga_kg: number;
-      tiene_refrigeracion: boolean;
-      placa: string;
-      radio_cobertura_km: number;
-    }> = {},
+    extra: ExtraVoluntario = {},
   ): Promise<Cuenta & { voluntarioId: string }> {
     const persona = await this.cuenta({ nombres: 'Vol' });
+    const { voluntarioId, verificacionId } = await this.solicitudVoluntario(
+      persona,
+      base,
+      extra,
+    );
+    await this.como(admin)
+      .post(`/v1/admin/verificaciones/${verificacionId}/aprobar`)
+      .expect(200);
+    await this.como(persona)
+      .put('/v1/voluntario/disponibilidad')
+      .send({
+        franjas: [0, 1, 2, 3, 4, 5, 6].map((dia) => ({
+          dia_semana: dia,
+          hora_inicio: '00:00',
+          hora_fin: '23:59',
+        })),
+      })
+      .expect(200);
+    await this.como(persona)
+      .patch('/v1/voluntario/estado')
+      .send({ disponible: true })
+      .expect(200);
+    return { ...persona, voluntarioId };
+  }
+
+  /** Solicitud de voluntario de `persona`, pendiente de revisión. */
+  async solicitudVoluntario(
+    persona: Cuenta,
+    base: { lat: number; lng: number },
+    extra: ExtraVoluntario = {},
+  ): Promise<{ voluntarioId: string; verificacionId: string }> {
     const solicitud = await this.como(persona)
       .post('/v1/voluntario/solicitud')
       .send({
@@ -319,28 +345,19 @@ export class ContextoPruebas {
         documento_frente: await this.ruta(persona, 'DOCUMENTO_IDENTIDAD'),
       })
       .expect(201);
-    await this.como(admin)
-      .post(
-        `/v1/admin/verificaciones/${solicitud.body.verificacion.id}/aprobar`,
-      )
-      .expect(200);
-    await this.como(persona)
-      .put('/v1/voluntario/disponibilidad')
-      .send({
-        franjas: [0, 1, 2, 3, 4, 5, 6].map((dia) => ({
-          dia_semana: dia,
-          hora_inicio: '00:00',
-          hora_fin: '23:59',
-        })),
-      })
-      .expect(200);
-    await this.como(persona)
-      .patch('/v1/voluntario/estado')
-      .send({ disponible: true })
-      .expect(200);
-    return { ...persona, voluntarioId: solicitud.body.voluntario_id as string };
+    return {
+      voluntarioId: solicitud.body.voluntario_id as string,
+      verificacionId: solicitud.body.verificacion.id as string,
+    };
   }
 }
+
+export type ExtraVoluntario = Partial<{
+  capacidad_carga_kg: number;
+  tiene_refrigeracion: boolean;
+  placa: string;
+  radio_cobertura_km: number;
+}>;
 
 /** Ventana de recogida que empieza ya y dura `horas`. */
 export function ventana(horas = 4, desdeMin = 1) {

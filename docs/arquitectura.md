@@ -545,7 +545,18 @@ La app (donante y voluntario) se entera de lo que cambian otros (el personal en 
 
 - La flota del banco no usa la app: sin voluntario no hay aviso.
 - Cambiar solo `asignacion.ruta_id` (rutas que planifica el personal) no avisa: la misma transacción crea la ruta y sus paradas, que sí avisan.
-- `notificacion`, `usuario`, `usuario_rol`, `voluntario`: pendiente.
+
+**Bandeja y cuenta.** Avisan solo a la persona dueña de la fila (migración `20261108000002_sincronizacion_cuenta_bandeja.sql`).
+
+| Tabla · cuándo | Quién recibe | `entidad` (ids extra) | Nunca avisa por |
+|---|---|---|---|
+| `notificacion` · INSERT | El destinatario (`usuario_id`) | `notificacion` (`tipo`: código de `tipo_notificacion`; `donacion_id`, `asignacion_id`) | `estado_envio`, `intentos`, `enviada_at` (envío del push), `leida_at` (marcar leída) |
+| `usuario` · cambio de `estado`, `debe_cambiar_password` o `deleted_at` | La propia persona | `cuenta` (`id`: su usuario) | `ultimo_acceso_at` (AuthGuard), `updated_at`, datos del perfil |
+| `usuario_rol` · INSERT; cambio de `activo` | La persona del rol | `cuenta` | — |
+| `voluntario` · INSERT; cambio de `estado_verificacion`, `disponible` o `deleted_at` | La persona voluntaria (`usuario_id`) | `cuenta` | `ultima_ubicacion`, `ultima_ubicacion_at`, `total_*`, `calificacion_promedio`, `updated_at` |
+
+- Aprobar una verificación cambia el rol y el perfil de voluntario en la misma transacción (DDL §17.2): un aviso de `cuenta` y otro de la notificación. Suspender también apaga `disponible`: un solo aviso.
+- Realtime autoriza al unirse y al refrescar el token, así que el aviso de una suspensión llega a un canal ya abierto. Al volver a pedir por REST, la app encuentra la cuenta bloqueada.
 
 ---
 
