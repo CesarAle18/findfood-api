@@ -230,7 +230,8 @@ export class AsignacionService {
 
   /**
    * Recolección con la flota del banco (modo FLOTA_BANCO): cierra la oferta
-   * viva y crea una asignación ya ACEPTADA con banco_ejecutor_id.
+   * viva, avisa a cada voluntario que la tenía (ASIGNACION_RETIRADA) y crea
+   * una asignación ya ACEPTADA con banco_ejecutor_id.
    */
   async asignarAFlota(
     tx: Tx,
@@ -243,6 +244,8 @@ export class AsignacionService {
       estados: ['OFRECIDA'],
       usuarioId,
       motivo: 'La recoge la flota del banco',
+      notificar: true,
+      codigoAviso: 'ASIGNACION_RETIRADA',
     });
     const [a] = await tx.$queryRaw<{ id: string }[]>`
       INSERT INTO asignacion

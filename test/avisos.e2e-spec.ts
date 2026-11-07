@@ -244,6 +244,40 @@ describe('Avisos a los afectados', () => {
     ]);
   });
 
+  it('N4: si la recoge la flota del banco, cada voluntario con oferta recibe un aviso con su asignación', async () => {
+    const p = await publicada();
+    await ctx
+      .como(asesor)
+      .post('/v1/rutas')
+      .send({ donacion_ids: [p.id], origen: ZONA })
+      .expect(201);
+    const retiradas = await avisos(p.id, ['ASIGNACION_RETIRADA']);
+    // Un aviso por voluntario: los dos y nadie más, sin duplicados.
+    expect(destinatarios(retiradas)).toEqual([v1.id, v2.id].sort());
+    for (const v of [v1, v2]) {
+      expect(retiradas.find((a) => a.usuario_id === v.id)).toEqual(
+        expect.objectContaining({
+          canal: 'PUSH',
+          asignacion_id: p.oferta(v),
+          data: {
+            tipo: 'ASIGNACION_RETIRADA',
+            donacion_id: p.id,
+            asignacion_id: p.oferta(v),
+          },
+          cuerpo: expect.stringContaining('banco de alimentos'),
+        }),
+      );
+      // Ni un DONACION_CANCELADA de más.
+      expect(await codigos(v.id, p.id)).toEqual([
+        'ASIGNACION_OFRECIDA',
+        'ASIGNACION_RETIRADA',
+      ]);
+    }
+    // El donante solo sabe que la aceptaron; el personal que la asignó no se avisa.
+    expect(await codigos(p.donante.id, p.id)).toEqual(['ASIGNACION_ACEPTADA']);
+    expect(await codigos(asesor.id, p.id)).toEqual([]);
+  });
+
   it('N2: reasignar o cancelar la ruta de la flota avisa al donante que se busca otro voluntario', async () => {
     const p = await aceptada();
     await ctx

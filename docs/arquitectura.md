@@ -518,6 +518,7 @@ Un disparador sobre `donacion` (DDL v3, §19.1) emite un mensaje *broadcast* al 
 | `ASIGNACION_OFRECIDA` | Voluntario | Recibe una oferta de recolección |
 | `ASIGNACION_ACEPTADA` | Donante | Un voluntario, o la flota del banco, tomó su donación |
 | `ASIGNACION_TOMADA` | Cada voluntario con oferta viva, con su asignación | Otro voluntario aceptó primero |
+| `ASIGNACION_RETIRADA` | Cada voluntario con oferta viva, con su asignación | El personal puso la donación en una ruta de la flota del banco (`POST /v1/rutas`) |
 | `VOLUNTARIO_EN_SITIO` | Donante | El voluntario llegó al punto de recogida |
 | `RECOGIDA_FALLIDA` | Donante | Su recogida quedó FALLIDA. La donación sigue abierta hasta que el personal la cancele o la reasigne |
 | `DONACION_RECOGIDA` · `DONACION_ENTREGADA` | Donante | Se confirmó la recogida o la entrega en la sede |

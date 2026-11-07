@@ -12,6 +12,9 @@
 --      sigue abierta hasta que el personal la cancele o la reasigne.
 --    * ASIGNACION_TOMADA: otro voluntario aceptó primero (cada voluntario con
 --      oferta viva, con su propia asignación).
+--    * ASIGNACION_RETIRADA: el personal puso la donación en una ruta de la
+--      flota del banco (cada voluntario con oferta viva, con su propia
+--      asignación).
 --    * INCIDENCIA_REPORTADA: incidencia nueva (personal ACTIVO). IN_APP como
 --      ALERTA_VENCIMIENTO: el personal usa el panel web, sin dispositivos push.
 --    * INCIDENCIA_EN_REVISION, INCIDENCIA_RESUELTA: a quien la reportó.
@@ -29,6 +32,8 @@ INSERT INTO tipo_notificacion (codigo, nombre, plantilla_titulo, plantilla_cuerp
      'La recogida de la donación {{codigo}} no pudo completarse. El banco de alimentos revisará el caso.','PUSH'),
     ('ASIGNACION_TOMADA','Oferta tomada por otro voluntario','Otro voluntario tomó la recolección',
      'La donación {{codigo}} ya fue aceptada por otro voluntario.','PUSH'),
+    ('ASIGNACION_RETIRADA','Oferta tomada por la flota del banco','La recolección ya no está disponible',
+     'La donación {{codigo}} será recogida por el banco de alimentos.','PUSH'),
     ('INCIDENCIA_REPORTADA','Incidencia nueva','Nueva incidencia',
      'Se reportó la incidencia {{codigo}}: {{tipo}} (nivel {{nivel}}).','IN_APP'),
     ('INCIDENCIA_EN_REVISION','Incidencia en revisión','Tu reporte está en revisión',
