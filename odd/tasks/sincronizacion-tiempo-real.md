@@ -40,8 +40,8 @@ Payload contract v1: `{ v: 1, entidad: 'donacion'|'asignacion'|'parada'|'ruta'|'
 | ID | Task | Route | Status | Commit | Review |
 |---|---|---|---|---|---|
 | API-0 | Baseline: lint, typecheck, unit, full e2e; record pre-existing failures | delegated verification worker + parent e2e run | [x] | — (no code) | n/a |
-| API-1 | Channel + authorization migration (`fn_rt_usuario_id`, `fn_rt_es_usuario_activo`, `pol_rt_usuario_leer`, `fn_rt_sincronizar`), `test/sincronizacion.e2e-spec.ts` policy cases, `docs/arquitectura.md` §19 + record 05 addendum | delegated writer (2+ non-trivial files) | [ ] | — | — |
-| API-2 | Flow triggers (`donacion`, `asignacion`, `parada_ruta`, `ruta`) + e2e flow cases | delegated writer | [ ] | — | — |
+| API-1 | Channel + authorization migration (`fn_rt_usuario_id`, `fn_rt_es_usuario_activo`, `pol_rt_usuario_leer`, `fn_rt_sincronizar`), `test/sincronizacion.e2e-spec.ts` policy cases, `docs/arquitectura.md` §9.4 + record 05 addendum | delegated writer (2+ non-trivial files) | [x] | `b4cc0c6` | medium · slice_budget_reached (452 lines) · native review unavailable (see Review) |
+| API-2 | Flow triggers (`donacion`, `asignacion`, `parada_ruta`, `ruta`) + e2e flow cases | delegated writer | [x] | `4e7a0d3` | medium · slice_budget_reached (983 lines) · native review unavailable |
 | API-3 | Account + inbox triggers (`notificacion`, `usuario`, `usuario_rol`, `voluntario`) + negative/positive e2e | delegated writer | [ ] | — | — |
 | API-4 | Missing notices N1–N7 (catalog migration, `encolar` calls, unit + e2e, docs); read-only web inbox check for unknown `tipo` | delegated writer | [ ] | — | — |
 
@@ -49,5 +49,11 @@ Payload contract v1: `{ v: 1, entidad: 'donacion'|'asignacion'|'parada'|'ruta'|'
 - 2026-11-07: plan approved; branch created; feature document created (`684f9cb`).
 - 2026-11-07: API-0 baseline @ `c0ab0c0`: `npm run lint` exit 0 (2 pre-existing warnings: unused `Prisma` import in `src/modulos/asignacion/rutas-dinamicas.service.ts:2`, `.sort()` without compare in `test/asignacion.e2e-spec.ts:306`); `npm run typecheck` exit 0; `npm test` 16/16 suites, 132/132; `npm run db:local:reiniciar` + `npm run test:e2e` 12/12 suites, 126/126 (needs the Docker Desktop engine running). No pre-existing failures.
 
+- 2026-11-07: API-1 `b4cc0c6` (writer; RED: 7/8 failing on missing `fn_rt_sincronizar`/`fn_rt_usuario_id`; the client-INSERT denial case passed before the migration and stays as a regression guard). Evidence: lint exit 0 (2 known warnings), typecheck exit 0, `npm test` 132/132, `test:e2e -- test/sincronizacion test/seguimiento test/flujo-completo` 36/36, `test/auth` 26/26; parent re-ran `test/sincronizacion` 8/8. Decisions: dedupe GUC `findfood.rt_sincronizados` (jsonb keyed by `[uid, entidad, id]`); `fn_rt_sincronizar` prepends `v: 1`; no grants on `fn_rt_sincronizar`; docs in `docs/arquitectura.md` §9.4 (Realtime is §9 in the doc, §19 in the DDL). Open: `fn_rt_es_usuario_activo` does not require `NOT debe_cambiar_password` (REST still enforces it).
+- 2026-11-07: API-2 `4e7a0d3` (writer; RED: 7 new flow cases failing on message assertions with correct HTTP statuses). Evidence: lint exit 0 (2 known warnings), typecheck exit 0, `npm test` 132/132, full `test:e2e` 13/13 suites, 141/141; parent re-ran `test/sincronizacion` 15/15. Accepted widening: `parada_ruta` also notifies donors whose pickup is COMPLETADA while their donation is still ASIGNADA/EN_RECOLECCION/EN_TRANSITO (their live-position window flips when another stop closes); each donor still receives only its own donation id. Observed extra emissions: losing volunteers get `donacion` + `asignacion` on accept; `trazar()` updates `geometria` after the accept transaction → a second `ruta` message; changing only `asignacion.ruta_id` emits nothing (same transaction already emits `ruta`/`parada`).
+
+## Review
+- gentle-ai 4.0.0: the `intended_untracked_selection` collect submission (`--contract … --projection=workspace --intended-untracked-selection=…`) drops `--base-ref/--committed-only`, so the re-entry targets the uncommitted workspace instead of the committed slice (observed in both repos). User decision (2026-11-07): continue without reporting; affected slices record native review as unavailable and follow the RDD-off tier path (assess tier → writer self-verification; independent verifier for high).
+
 ## Next step
-API-1 channel + authorization.
+API-3 account + inbox triggers.
