@@ -39,6 +39,7 @@ The donor is only told when the donation is accepted and when it was already pic
 
 - 2026-11-07: T2 done in the app, commit `e5f7c13`. RED: `npx jest src/notifications/notification-routes` 1 failed / 19 passed (the new type fell back to the alerts tab). GREEN: `npx jest src/notifications` 4 suites / 65 tests passed; `npm run typecheck` exit 0; `npx eslint src/notifications` exit 0.
 - 2026-11-07: parent spot check of the `4db2b84` diff (`llegada` notification block + migration): matches the scope.
+- 2026-11-07: RDD on. `gentle-ai review assess --committed-only` (untracked excluded): API `33bcced..` medium, 119 lines, `review_due: false` (`under_budget`); app `3bdfc71..` medium, 52 lines, `review_due: false` (`under_budget`). No native review due; boundaries stay at the branch points.
 
 ## Next step
 Start Docker, `npm run db:local`, `npm run test:e2e -- test/flujo-completo` to observe T1 green. Apply the migration to Supabase (`supabase db push`) before deploying the API. Push/PR are the user's decision.
