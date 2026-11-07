@@ -509,6 +509,30 @@ Un disparador sobre `donacion` (DDL v3, §19.1) emite un mensaje *broadcast* al 
 - Los tokens de Expo/FCM se registran en `dispositivo_push` (varios por persona).
 - Toda notificación nace como fila `PENDIENTE` en `notificacion`, dentro de la transacción del hecho que la provoca, y la envía la tarea `enviar_notificaciones` (§7). La misma fila es la entrada de la bandeja dentro de la app (`leida_at`).
 - Las plantillas viven en `tipo_notificacion`.
+- Nunca se avisa a quien provoca el hecho: el donante que cancela su propia donación o el personal que reporta, revisa o resuelve su propia incidencia no recibe nada.
+- `data` lleva `tipo` (el código) y, cuando aplica, `donacion_id`, `asignacion_id` e `incidencia_id`, para que la app abra la pantalla que corresponde.
+- No hay preferencias por usuario: cada aviso llega a todos sus destinatarios.
+
+| Código | Quién lo recibe | Cuándo |
+|---|---|---|
+| `ASIGNACION_OFRECIDA` | Voluntario | Recibe una oferta de recolección |
+| `ASIGNACION_ACEPTADA` | Donante | Un voluntario, o la flota del banco, tomó su donación |
+| `ASIGNACION_TOMADA` | Cada voluntario con oferta viva, con su asignación | Otro voluntario aceptó primero |
+| `VOLUNTARIO_EN_SITIO` | Donante | El voluntario llegó al punto de recogida |
+| `RECOGIDA_FALLIDA` | Donante | Su recogida quedó FALLIDA. La donación sigue abierta hasta que el personal la cancele o la reasigne |
+| `DONACION_RECOGIDA` · `DONACION_ENTREGADA` | Donante | Se confirmó la recogida o la entrega en la sede |
+| `DONACION_RECIBIDA` · `DONACION_RECHAZADA` | Donante | Recepción en el banco (§10.1) |
+| `DONACION_EXPIRADA` | Donante | Nadie aceptó a tiempo, o tras un abandono o una ruta cancelada la ventana ya no deja margen para otra recogida |
+| `DONACION_REPUBLICADA` | Donante | Vuelve a PUBLICADA para otro voluntario: reasignación del personal, abandono con margen o ruta de la flota cancelada |
+| `DONACION_CANCELADA_BANCO` | Donante | El ADMIN canceló su donación. `Motivo:` es la observación o, sin ella, el motivo del catálogo |
+| `DONACION_CANCELADA` | Voluntario con oferta o asignación viva | La donación se canceló o se reasignó, o su ruta venció |
+| `VERIFICACION_APROBADA` · `VERIFICACION_RECHAZADA` | Solicitante | Revisión de su solicitud de voluntario |
+| `INCIDENCIA_REPORTADA` | Personal ACTIVO salvo quien reporta (IN_APP) | Incidencia nueva, también las que abre el sistema (recogida fallida, abandono sin margen) |
+| `INCIDENCIA_EN_REVISION` · `INCIDENCIA_RESUELTA` | Quien la reportó | El personal la toma o la resuelve |
+| `ALERTA_VENCIMIENTO` | ASESOR_BANCO (IN_APP) | Lotes próximos a vencer |
+
+- Los avisos al personal son IN_APP: trabaja en el panel web, sin dispositivos push. `DONACION_EN_CAMINO` está sembrado, pero la API no lo emite.
+- Cancelar una ruta no tiene aviso propio. El personal solo cancela rutas de la flota, cuyas donaciones avisan con `DONACION_REPUBLICADA` o `DONACION_EXPIRADA`. La tarea `cancelar_rutas_vencidas` avisa por cada recogida (§7).
 
 ### 9.4 Sincronización de la app móvil (`usuario:<uuid>`)
 

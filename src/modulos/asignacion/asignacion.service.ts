@@ -14,7 +14,10 @@ import type { estado_asignacion } from '../../generated/prisma/enums';
 import { DonacionesService } from '../donaciones/donaciones.service';
 import { VoluntarioService } from '../identidad/voluntario.service';
 import { IncidenciasService } from '../incidencias/incidencias.service';
-import { NotificacionesService } from '../notificaciones/notificaciones.service';
+import {
+  type CodigoNotificacion,
+  NotificacionesService,
+} from '../notificaciones/notificaciones.service';
 import type { CalificacionDto, RespuestaConMotivoDto } from './asignacion.dto';
 import { MotorAsignacionService } from './motor.service';
 import { RutasDinamicasService } from './rutas-dinamicas.service';
@@ -25,6 +28,8 @@ export interface OpcionesCierre {
   motivo?: string;
   /** Avisar al voluntario que ya no debe recoger (DONACION_CANCELADA). */
   notificar?: boolean;
+  /** Otro aviso en lugar de DONACION_CANCELADA (p. ej. ASIGNACION_TOMADA). */
+  codigoAviso?: CodigoNotificacion;
   /** El llamador cierra la ruta por su cuenta: no cancelarla aunque quede vacía. */
   conservarRuta?: boolean;
 }
@@ -125,7 +130,7 @@ export class AsignacionService {
            WHERE v.id = ${a.voluntario_id}::uuid AND d.id = ${donacionId}::uuid`;
         await this.notificaciones.encolar(tx, {
           usuarioId: v.usuario_id,
-          codigo: 'DONACION_CANCELADA',
+          codigo: op.codigoAviso ?? 'DONACION_CANCELADA',
           donacionId,
           asignacionId: a.id,
           variables: { codigo: v.codigo },
@@ -440,11 +445,14 @@ export class AsignacionService {
         nuevo: 'ACEPTADA',
         usuarioId: usuario.id,
       });
-      // Quien llegó primero se queda la donación: las demás ofertas se cierran.
+      // Quien llegó primero se queda la donación: las demás ofertas se cierran
+      // y cada voluntario sabe que ya no está disponible.
       await this.cerrarVigentes(tx, oferta.donacion_id, 'CANCELADA', {
         estados: ['OFRECIDA'],
         usuarioId: usuario.id,
         motivo: 'Otro voluntario aceptó la donación',
+        notificar: true,
+        codigoAviso: 'ASIGNACION_TOMADA',
       });
       await this.notificaciones.encolar(tx, {
         usuarioId: bloqueada!.donante_usuario_id,
