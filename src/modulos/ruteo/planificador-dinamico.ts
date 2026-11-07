@@ -46,7 +46,9 @@ export function planificarRutaDinamica(datos: DatosPlanDinamico): PlanDinamico {
     return falla('RUTA_ENTREGA_INICIADA', 'No se añaden recogidas después de iniciar la entrega');
   if (recogidas.some(p => p.donacionId === nueva.donacionId))
     return falla('DONACION_YA_EN_RUTA', 'La donación ya pertenece a la ruta');
-  if (recogidas.length + 1 > datos.maxRecogidas)
+  // Las recogidas omitidas (abandonos) o fallidas ya no ocupan cupo en la ruta.
+  const ocupadas = recogidas.filter(p => p.estado !== 'FALLIDA' && p.estado !== 'OMITIDA');
+  if (ocupadas.length + 1 > datos.maxRecogidas)
     return falla('RUTA_SIN_CUPOS', 'Se alcanzó el máximo de recogidas permitidas');
   if (nueva.ventanaFin.getTime() <= ahora.getTime())
     return falla('VENTANA_CERRADA', 'La ventana de la nueva donación ya terminó');

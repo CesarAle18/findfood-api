@@ -19,6 +19,19 @@ describe('planificarRutaDinamica', () => {
     expect(r.viable).toBe(true);
     if (r.viable) expect(new Set(r.ordenDonacionesPendientes)).toEqual(new Set(['d1','d2']));
   });
+  it('rechaza la recogida cuando la ruta ya está en el máximo', () => {
+    const r = planificarRutaDinamica({...base, maxRecogidas:1});
+    expect(r).toMatchObject({viable:false,codigo:'RUTA_SIN_CUPOS'});
+  });
+  it('las recogidas omitidas o fallidas no ocupan cupo', () => {
+    const r = planificarRutaDinamica({...base, maxRecogidas:1,
+      recogidas:[
+        {...base.recogidas[0], estado:'OMITIDA' as const},
+        {...base.recogidas[0], id:'p0', donacionId:'d0', orden:0, estado:'FALLIDA' as const},
+      ],
+      duracionesMin:[[0,5,12],[5,0,6],[12,6,0]]});
+    expect(r.viable).toBe(true);
+  });
   it('rechaza una sede diferente', () => {
     const r = planificarRutaDinamica({...base, sedeDonacionId:'s2'});
     expect(r).toMatchObject({viable:false,codigo:'RUTA_SEDE_DISTINTA'});

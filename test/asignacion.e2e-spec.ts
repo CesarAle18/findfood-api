@@ -602,6 +602,45 @@ describe('Asignación', () => {
       expect(ok.body.valor).toBe('5');
     });
 
+    it('MAX_PARADAS_POR_RUTA limita las recogidas que un voluntario acepta en su ruta', async () => {
+      const fijar = (valor: string) =>
+        ctx
+          .como(admin)
+          .put('/v1/admin/parametros/MAX_PARADAS_POR_RUTA')
+          .send({ valor })
+          .expect(200);
+      await fijar('2');
+      try {
+        const voluntario = await ctx.voluntario(admin, cerca(0.001));
+        const donante = await ctx.cuenta();
+        const aceptar = async (d: number) => {
+          const id = await crearDonacion(donante, { ubicacion: cerca(d), horas: 6 });
+          await publicar(donante, id);
+          const oferta = await ofertaDe(id, voluntario);
+          return ctx
+            .como(voluntario)
+            .post(`/v1/asignaciones/${oferta.id}/aceptar`);
+        };
+        const primera = await aceptar(0.002);
+        expect(primera.status).toBe(200);
+        const segunda = await aceptar(0.003);
+        expect(segunda.status).toBe(200);
+        expect(segunda.body.ruta.id).toBe(primera.body.ruta.id);
+
+        const tercera = await aceptar(0.004);
+        expect(tercera.status).toBe(422);
+        expect(tercera.body.type).toBe('RUTA_SIN_CUPOS');
+        const { rows } = await ctx.sql.query<{ recogidas: number }>(
+          `SELECT count(*)::int AS recogidas FROM parada_ruta
+            WHERE ruta_id = $1 AND tipo = 'RECOGIDA'`,
+          [primera.body.ruta.id],
+        );
+        expect(rows[0].recogidas).toBe(2);
+      } finally {
+        await fijar('5');
+      }
+    });
+
     it('limita las paradas por ruta a 1–5', async () => {
       for (const valor of ['0', '6']) {
         const r = await ctx
