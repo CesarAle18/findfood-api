@@ -510,6 +510,33 @@ Un disparador sobre `donacion` (DDL v3, §19.1) emite un mensaje *broadcast* al 
 - Toda notificación nace como fila `PENDIENTE` en `notificacion`, dentro de la transacción del hecho que la provoca, y la envía la tarea `enviar_notificaciones` (§7). La misma fila es la entrada de la bandeja dentro de la app (`leida_at`).
 - Las plantillas viven en `tipo_notificacion`.
 
+### 9.4 Sincronización de la app móvil (`usuario:<uuid>`)
+
+La app (donante y voluntario) se entera de lo que cambian otros (el personal en el panel, otros voluntarios, las tareas programadas) sin salir de la pantalla. Cada usuario tiene un tópico privado `usuario:<uuid>` con el evento `sync`. El mensaje es solo un **aviso de invalidación**: la app vuelve a pedir el recurso por REST, donde la API aplica roles y propiedad. Migración `20261108000000_sincronizacion_canal_usuario.sql`.
+
+- **Quién lee** (`pol_rt_usuario_leer`): solo el dueño del tópico (`fn_rt_usuario_id(topic) = auth.uid()`), mientras su cuenta esté ACTIVA y no eliminada (`fn_rt_es_usuario_activo`). Como en §9.2, Realtime lo decide al unirse y al refrescar el token.
+- **Quién emite:** solo `fn_rt_sincronizar`, llamada desde disparadores SECURITY DEFINER. Ni los clientes ni la API (`app_backend`) pueden ejecutarla, y no hay política INSERT para estos tópicos (la de `ruta:<id>` no los cubre).
+- `banco:donaciones` (§9.1) y `ruta:<id>` (§9.2) no cambian. El panel sigue en `banco:donaciones`.
+
+**Contrato v1 del mensaje.** Solo identificadores para saber qué volver a pedir: sin datos de negocio ni `estado`. Las claves nulas no viajan, y un donante nunca recibe ids de donaciones de otros donantes.
+
+| Campo | Contenido |
+|---|---|
+| `v` | `1`. Lo pone `fn_rt_sincronizar` si falta. |
+| `entidad` | `donacion`, `asignacion`, `parada`, `ruta`, `notificacion` o `cuenta` |
+| `id`, `donacion_id`, `ruta_id`, `asignacion_id`, `tipo` | Opcionales |
+
+**Eficiencia.**
+
+- Disparadores AFTER filtrados por columna (`UPDATE OF … WHEN (… IS DISTINCT FROM …)`). Nunca emiten por la ubicación del voluntario, `usuario.ultimo_acceso_at`, `notificacion.estado_envio`/`leida_at`, `updated_at` ni las columnas de ETA u orden.
+- A lo sumo un aviso por `(usuario, entidad, id)` en cada transacción: `fn_rt_sincronizar` recuerda los enviados en la variable local `findfood.rt_sincronizados`.
+- El aviso no trae datos: la app vuelve a pedir por REST lo que tenga en pantalla.
+
+**Tablas que emiten** (pendiente: llegan con sus disparadores):
+
+- `donacion`, `asignacion`, `parada_ruta`, `ruta`: pendiente.
+- `notificacion`, `usuario`, `usuario_rol`, `voluntario`: pendiente.
+
 ---
 
 ## 10. Recepción e inventario FEFO
@@ -803,6 +830,8 @@ Errores con Sentry (`@sentry/nestjs`) y logs estructurados en JSON (`nestjs-pino
 | 08 | Google Routes para la operación, con *fallback* geodésico y N acotado. OSRM en contenedor **solo** para *benchmarks* | OSRM como motor de operación | Costo por uso de Google, vigilado en §16. Mantener el contenedor OSRM para las pruebas. |
 | 09 | Posición en vivo por *broadcast* efímero | Tabla de posiciones | Sin historial de recorrido (solo la muestra periódica) |
 | 10 | Sin DELETE para `app_backend` salvo tablas desechables | DELETE general | Correcciones por estado, no por borrado |
+
+**Adenda a ADR-05 (2026-11).** La app móvil usa el mismo mecanismo con un tópico privado por usuario, `usuario:<uuid>` (§9.4), en lugar de `postgres_changes` o de consultar la API más seguido. El mensaje es solo un aviso de invalidación: no abre lectura de tablas a los clientes ni duplica la autorización de la API. Costo aceptado: un disparador filtrado por columna en cada tabla que emite, y un segundo contrato de mensaje, versionado con `v`.
 
 ---
 
