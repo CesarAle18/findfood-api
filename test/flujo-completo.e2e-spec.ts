@@ -263,6 +263,33 @@ describe('Flujo completo de una donación', () => {
       .expect(200);
   });
 
+  it('la llegada a la recogida avisa al donante una sola vez', async () => {
+    const enSitio = async () => {
+      const b = await ctx
+        .como(donante)
+        .get('/v1/me/notificaciones?limite=100')
+        .expect(200);
+      return b.body.datos.filter(
+        (n: { tipo: string }) => n.tipo === 'VOLUNTARIO_EN_SITIO',
+      );
+    };
+    const avisos = await enSitio();
+    expect(avisos).toHaveLength(1);
+    expect(avisos[0].donacion_id).toBe(donacionId);
+    // ctx.voluntario crea a la persona con nombres 'Vol'.
+    expect(avisos[0].cuerpo).toBe(
+      'Vol está en el punto de recogida de tu donación.',
+    );
+
+    // Repetir la llegada es idempotente: no vuelve a avisar.
+    await ctx
+      .como(voluntarioAsignado)
+      .post(`/v1/paradas/${recogidaId}/llegada`)
+      .send({ ubicacion: ZONA })
+      .expect(200);
+    expect(await enSitio()).toHaveLength(1);
+  });
+
   it('confirmar la recogida exige foto y GPS preciso (o confirmación manual)', async () => {
     const confirmacion = {
       peso_confirmado_kg: 9.5,
@@ -334,6 +361,22 @@ describe('Flujo completo de una donación', () => {
   });
 
   it('el asesor confirma la entrega en la sede: la asignación y la ruta se completan', async () => {
+    // La llegada a la sede (ENTREGA) no avisa al donante.
+    await ctx
+      .como(voluntarioAsignado)
+      .post(`/v1/paradas/${entregaId}/llegada`)
+      .send({ ubicacion: { lat: ZONA.lat + 0.01, lng: ZONA.lng + 0.01 } })
+      .expect(200);
+    const bandeja = await ctx
+      .como(donante)
+      .get('/v1/me/notificaciones?limite=100')
+      .expect(200);
+    expect(
+      bandeja.body.datos.filter(
+        (n: { tipo: string }) => n.tipo === 'VOLUNTARIO_EN_SITIO',
+      ),
+    ).toHaveLength(1);
+
     await ctx
       .como(voluntarioAsignado)
       .post('/v1/evidencias')

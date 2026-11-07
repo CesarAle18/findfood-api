@@ -9,6 +9,7 @@ import { renderizarPlantilla } from './plantilla';
 export type CodigoNotificacion =
   | 'ASIGNACION_OFRECIDA'
   | 'ASIGNACION_ACEPTADA'
+  | 'VOLUNTARIO_EN_SITIO'
   | 'DONACION_RECOGIDA'
   | 'DONACION_EN_CAMINO'
   | 'DONACION_ENTREGADA'
