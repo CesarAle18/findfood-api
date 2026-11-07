@@ -532,9 +532,19 @@ La app (donante y voluntario) se entera de lo que cambian otros (el personal en 
 - A lo sumo un aviso por `(usuario, entidad, id)` en cada transacción: `fn_rt_sincronizar` recuerda los enviados en la variable local `findfood.rt_sincronizados`.
 - El aviso no trae datos: la app vuelve a pedir por REST lo que tenga en pantalla.
 
-**Tablas que emiten** (pendiente: llegan con sus disparadores):
+**Tablas que emiten.** El flujo de la donación avisa desde disparadores AFTER por fila (migración `20261108000001_sincronizacion_flujo.sql`). Un donante solo recibe `{ entidad: 'donacion', id }` de sus propias donaciones.
 
-- `donacion`, `asignacion`, `parada_ruta`, `ruta`: pendiente.
+| Tabla · cuándo | Quién recibe | `entidad` (ids extra) |
+|---|---|---|
+| `donacion` · INSERT no BORRADOR; cambio de `estado` | El donante y los voluntarios con una oferta viva o la asignación aceptada (`OFRECIDA`, `ACEPTADA`) | `donacion` |
+| `asignacion` · INSERT; cambio de `estado` | El voluntario de la oferta | `asignacion` (`donacion_id`, `ruta_id`) |
+| | El donante, solo cuando entra en `ACEPTADA` o sale de ella; nunca por oferta | `donacion` |
+| `parada_ruta` · INSERT; cambio de `estado` (nunca orden ni ETA) | El voluntario de la ruta | `parada` (`ruta_id`, `donacion_id`) |
+| | Los donantes de la parada, de las recogidas abiertas y de las ya recogidas camino al banco: su seguimiento depende de las demás paradas (§9.2) | `donacion` |
+| `ruta` · INSERT; cambio de `estado` o `geometria` | El voluntario de la ruta | `ruta` |
+
+- La flota del banco no usa la app: sin voluntario no hay aviso.
+- Cambiar solo `asignacion.ruta_id` (rutas que planifica el personal) no avisa: la misma transacción crea la ruta y sus paradas, que sí avisan.
 - `notificacion`, `usuario`, `usuario_rol`, `voluntario`: pendiente.
 
 ---
