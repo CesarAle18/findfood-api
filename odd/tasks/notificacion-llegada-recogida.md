@@ -19,7 +19,7 @@ The donor is only told when the donation is accepted and when it was already pic
 
 ## Tasks
 - [x] T1 (findfood-api) migration seeding `VOLUNTARIO_EN_SITIO`; add it to `CodigoNotificacion`; enqueue it in `RuteoService.llegada` for RECOGIDA stops; e2e coverage (notified once, not on repeat, not on ENTREGA). Route: delegated writer (2+ non-trivial files). Commit `4db2b84`. E2E run still pending (local DB unavailable).
-- [ ] T2 (app) `VOLUNTARIO_EN_SITIO` opens `/donante/seguimiento?id=<donacion>` in `notification-routes.ts`; table test. Route: inline (one mapping line + one test row, mechanical).
+- [x] T2 (app) `VOLUNTARIO_EN_SITIO` opens `/donante/seguimiento?id=<donacion>` in `notification-routes.ts`; table test. Route: inline (one mapping line + one test row, mechanical). Commit `e5f7c13`.
 
 ## Acceptance criteria
 - After `llegada` on a pickup stop, the donor's `/v1/me/notificaciones` has one `VOLUNTARIO_EN_SITIO` row with the donation id, naming the volunteer.
@@ -37,5 +37,8 @@ The donor is only told when the donation is accepted and when it was already pic
   - Checks: `npm run lint` exit 0 with 2 warnings, both pre-existing (base has the same 2) · `npm run typecheck` exit 0 · `npm test` 14 suites / 117 tests passed · `npm run test:e2e -- test/flujo-completo` blocked (`ECONNREFUSED 127.0.0.1:54329`).
   - Remote: the real Supabase project needs `supabase db push` for this migration (left to the user). Until then `llegada` on a pickup stop fails with "Tipo de notificación VOLUNTARIO_EN_SITIO no existe".
 
+- 2026-11-07: T2 done in the app, commit `e5f7c13`. RED: `npx jest src/notifications/notification-routes` 1 failed / 19 passed (the new type fell back to the alerts tab). GREEN: `npx jest src/notifications` 4 suites / 65 tests passed; `npm run typecheck` exit 0; `npx eslint src/notifications` exit 0.
+- 2026-11-07: parent spot check of the `4db2b84` diff (`llegada` notification block + migration): matches the scope.
+
 ## Next step
-Run `npm run db:local` + `npm run test:e2e -- test/flujo-completo` to observe T1 green; then T2.
+Start Docker, `npm run db:local`, `npm run test:e2e -- test/flujo-completo` to observe T1 green. Apply the migration to Supabase (`supabase db push`) before deploying the API. Push/PR are the user's decision.
