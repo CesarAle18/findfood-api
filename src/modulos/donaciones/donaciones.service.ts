@@ -121,7 +121,8 @@ export class DonacionesService {
   }
 
   /**
-   * Vuelve a PUBLICADA con un plazo nuevo, acotado por el cierre de la ventana.
+   * Vuelve a PUBLICADA con un plazo nuevo, acotado por el cierre de la ventana,
+   * y avisa al donante (DONACION_REPUBLICADA) salvo que lo haga él mismo.
    * Devuelve false si la ventana ya no deja margen para otra recogida.
    */
   async reabrirPublicacion(
@@ -153,6 +154,14 @@ export class DonacionesService {
       usuarioId,
       motivo,
     });
+    if (actual.donante_usuario_id !== usuarioId) {
+      await this.notificaciones.encolar(tx, {
+        usuarioId: actual.donante_usuario_id,
+        codigo: 'DONACION_REPUBLICADA',
+        donacionId,
+        variables: { codigo: actual.codigo },
+      });
+    }
     return true;
   }
 
@@ -946,6 +955,18 @@ export class DonacionesService {
           observacion_cancelacion: dto.observacion ?? null,
         },
       });
+      // Solo el ADMIN cancela donaciones ajenas; el dueño no se avisa a sí mismo.
+      if (actual.donante_usuario_id !== usuario.id) {
+        await this.notificaciones.encolar(tx, {
+          usuarioId: actual.donante_usuario_id,
+          codigo: 'DONACION_CANCELADA_BANCO',
+          donacionId: id,
+          variables: {
+            codigo: actual.codigo,
+            motivo: dto.observacion?.trim() || motivo.nombre,
+          },
+        });
+      }
     });
     return this.detalle(usuario, id);
   }

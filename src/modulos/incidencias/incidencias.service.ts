@@ -1,5 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { esPersonal, type UsuarioAutenticado } from '../../comun/auth/tipos';
+import {
+  esPersonal,
+  ROLES_PERSONAL,
+  type UsuarioAutenticado,
+} from '../../comun/auth/tipos';
 import { generarCodigo } from '../../comun/codigos';
 import { type Coordenada, sqlPuntoOpcional } from '../../comun/geo';
 import {
@@ -13,6 +17,7 @@ import { TrazabilidadService } from '../../comun/trazabilidad/trazabilidad.servi
 import type { Pagina } from '../../comun/validacion';
 import type { Prisma } from '../../generated/prisma/client';
 import type { severidad } from '../../generated/prisma/enums';
+import { NotificacionesService } from '../notificaciones/notificaciones.service';
 import type {
   ContextoIncidenciaDto,
   CrearIncidenciaDto,
@@ -28,16 +33,31 @@ export interface NuevaIncidencia extends ContextoIncidenciaDto {
   ubicacion?: Coordenada | null;
 }
 
+/** Lo que revisar y resolver necesitan para validar el estado y avisar a quien reportó. */
+const SELECCION_AVISO = {
+  estado: true,
+  codigo: true,
+  reportada_por: true,
+  donacion_id: true,
+  asignacion_id: true,
+} satisfies Prisma.incidenciaSelect;
+
+type IncidenciaAviso = Prisma.incidenciaGetPayload<{
+  select: typeof SELECCION_AVISO;
+}>;
+
 @Injectable()
 export class IncidenciasService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly trazabilidad: TrazabilidadService,
+    private readonly notificaciones: NotificacionesService,
   ) {}
 
   /**
-   * Registra la incidencia dentro de la transacción de quien la origina. La
-   * API también la usa para incidencias que detecta el sistema (§6.7).
+   * Registra la incidencia dentro de la transacción de quien la origina y
+   * avisa al personal ACTIVO salvo a quien la reporta (INCIDENCIA_REPORTADA).
+   * La API también la usa para incidencias que detecta el sistema (§6.7).
    */
   async registrar(
     tx: Tx,
@@ -48,7 +68,7 @@ export class IncidenciasService {
         activo: true,
         ...(n.tipoId ? { id: n.tipoId } : { codigo: n.tipoCodigo ?? 'OTRO' }),
       },
-      select: { id: true, severidad_default: true },
+      select: { id: true, nombre: true, severidad_default: true },
     });
     if (!tipo)
       throw noProcesable(
@@ -62,6 +82,7 @@ export class IncidenciasService {
       );
     }
     const codigo = generarCodigo('INC');
+    const nivel = n.nivel ?? tipo.severidad_default;
     const [{ id }] = await tx.$queryRaw<{ id: string }[]>`
       INSERT INTO incidencia
         (codigo, tipo_incidencia_id, reportada_por, donacion_id, asignacion_id, parada_id,
@@ -70,7 +91,7 @@ export class IncidenciasService {
         ${codigo}, ${tipo.id}::smallint, ${n.reportadaPor}::uuid,
         ${n.donacion_id ?? null}::uuid, ${n.asignacion_id ?? null}::uuid,
         ${n.parada_id ?? null}::uuid, ${n.recepcion_id ?? null}::uuid,
-        ${n.descripcion}, ${n.nivel ?? tipo.severidad_default}::severidad,
+        ${n.descripcion}, ${nivel}::severidad,
         ${sqlPuntoOpcional(n.ubicacion)})
       RETURNING id`;
     await this.trazabilidad.registrar(tx, {
@@ -80,6 +101,28 @@ export class IncidenciasService {
       usuarioId: n.reportadaPor,
       ubicacion: n.ubicacion,
     });
+    const personal = await tx.usuario.findMany({
+      where: {
+        id: { not: n.reportadaPor },
+        estado: 'ACTIVO',
+        deleted_at: null,
+        usuario_rol_usuario_rol_usuario_idTousuario: {
+          some: { activo: true, rol: { codigo: { in: [...ROLES_PERSONAL] } } },
+        },
+      },
+      select: { id: true },
+    });
+    await this.notificaciones.encolarVarias(
+      tx,
+      personal.map((u) => ({
+        usuarioId: u.id,
+        codigo: 'INCIDENCIA_REPORTADA' as const,
+        donacionId: n.donacion_id,
+        asignacionId: n.asignacion_id,
+        data: { incidencia_id: id },
+        variables: { codigo, tipo: tipo.nombre, nivel: nivel.toLowerCase() },
+      })),
+    );
     return { id, codigo };
   }
 
@@ -147,7 +190,7 @@ export class IncidenciasService {
     await this.prisma.transaccion(async (tx) => {
       const actual = await tx.incidencia.findUnique({
         where: { id },
-        select: { estado: true },
+        select: SELECCION_AVISO,
       });
       if (!actual) throw noEncontrado('Incidencia');
       if (actual.estado === 'RESUELTA' || actual.estado === 'CERRADA') {
@@ -170,6 +213,16 @@ export class IncidenciasService {
         usuarioId: usuario.id,
         motivo: resolucion,
       });
+      await this.avisarReportante(
+        tx,
+        usuario,
+        id,
+        actual,
+        'INCIDENCIA_RESUELTA',
+        {
+          resolucion,
+        },
+      );
     });
     return this.detalle(usuario, id);
   }
@@ -179,7 +232,7 @@ export class IncidenciasService {
     await this.prisma.transaccion(async (tx) => {
       const actual = await tx.incidencia.findUnique({
         where: { id },
-        select: { estado: true },
+        select: SELECCION_AVISO,
       });
       if (!actual) throw noEncontrado('Incidencia');
       if (actual.estado !== 'ABIERTA') {
@@ -199,8 +252,35 @@ export class IncidenciasService {
         nuevo: 'EN_REVISION',
         usuarioId: usuario.id,
       });
+      await this.avisarReportante(
+        tx,
+        usuario,
+        id,
+        actual,
+        'INCIDENCIA_EN_REVISION',
+      );
     });
     return this.detalle(usuario, id);
+  }
+
+  /** A quien reportó la incidencia, salvo que sea quien la revisa o la resuelve. */
+  private async avisarReportante(
+    tx: Tx,
+    usuario: UsuarioAutenticado,
+    id: string,
+    incidencia: IncidenciaAviso,
+    codigo: 'INCIDENCIA_EN_REVISION' | 'INCIDENCIA_RESUELTA',
+    variables: Record<string, string> = {},
+  ): Promise<void> {
+    if (incidencia.reportada_por === usuario.id) return;
+    await this.notificaciones.encolar(tx, {
+      usuarioId: incidencia.reportada_por,
+      codigo,
+      donacionId: incidencia.donacion_id,
+      asignacionId: incidencia.asignacion_id,
+      data: { incidencia_id: id },
+      variables: { codigo: incidencia.codigo, ...variables },
+    });
   }
 
   private readonly seleccion = {

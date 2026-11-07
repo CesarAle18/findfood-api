@@ -981,6 +981,16 @@ export class RuteoService {
         donacion_id: p.donacion_id!,
         ubicacion: dto.ubicacion,
       });
+      // La donación sigue abierta: el personal la cancela o la reasigna (§6.7).
+      const donacion = await this.donaciones.bloquear(tx, p.donacion_id!);
+      if (donacion && donacion.donante_usuario_id !== usuario.id) {
+        await this.notificaciones.encolar(tx, {
+          usuarioId: donacion.donante_usuario_id,
+          codigo: 'RECOGIDA_FALLIDA',
+          donacionId: p.donacion_id!,
+          variables: { codigo: donacion.codigo },
+        });
+      }
     });
     return this.parada(paradaId);
   }

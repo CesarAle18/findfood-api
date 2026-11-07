@@ -509,6 +509,79 @@ Un disparador sobre `donacion` (DDL v3, §19.1) emite un mensaje *broadcast* al 
 - Los tokens de Expo/FCM se registran en `dispositivo_push` (varios por persona).
 - Toda notificación nace como fila `PENDIENTE` en `notificacion`, dentro de la transacción del hecho que la provoca, y la envía la tarea `enviar_notificaciones` (§7). La misma fila es la entrada de la bandeja dentro de la app (`leida_at`).
 - Las plantillas viven en `tipo_notificacion`.
+- Nunca se avisa a quien provoca el hecho: el donante que cancela su propia donación o el personal que reporta, revisa o resuelve su propia incidencia no recibe nada.
+- `data` lleva `tipo` (el código) y, cuando aplica, `donacion_id`, `asignacion_id` e `incidencia_id`, para que la app abra la pantalla que corresponde.
+- No hay preferencias por usuario: cada aviso llega a todos sus destinatarios.
+
+| Código | Quién lo recibe | Cuándo |
+|---|---|---|
+| `ASIGNACION_OFRECIDA` | Voluntario | Recibe una oferta de recolección |
+| `ASIGNACION_ACEPTADA` | Donante | Un voluntario, o la flota del banco, tomó su donación |
+| `ASIGNACION_TOMADA` | Cada voluntario con oferta viva, con su asignación | Otro voluntario aceptó primero |
+| `ASIGNACION_RETIRADA` | Cada voluntario con oferta viva, con su asignación | El personal puso la donación en una ruta de la flota del banco (`POST /v1/rutas`) |
+| `VOLUNTARIO_EN_SITIO` | Donante | El voluntario llegó al punto de recogida |
+| `RECOGIDA_FALLIDA` | Donante | Su recogida quedó FALLIDA. La donación sigue abierta hasta que el personal la cancele o la reasigne |
+| `DONACION_RECOGIDA` · `DONACION_ENTREGADA` | Donante | Se confirmó la recogida o la entrega en la sede |
+| `DONACION_RECIBIDA` · `DONACION_RECHAZADA` | Donante | Recepción en el banco (§10.1) |
+| `DONACION_EXPIRADA` | Donante | Nadie aceptó a tiempo, o tras un abandono o una ruta cancelada la ventana ya no deja margen para otra recogida |
+| `DONACION_REPUBLICADA` | Donante | Vuelve a PUBLICADA para otro voluntario: reasignación del personal, abandono con margen o ruta de la flota cancelada |
+| `DONACION_CANCELADA_BANCO` | Donante | El ADMIN canceló su donación. `Motivo:` es la observación o, sin ella, el motivo del catálogo |
+| `DONACION_CANCELADA` | Voluntario con oferta o asignación viva | La donación se canceló o se reasignó, o su ruta venció |
+| `VERIFICACION_APROBADA` · `VERIFICACION_RECHAZADA` | Solicitante | Revisión de su solicitud de voluntario |
+| `INCIDENCIA_REPORTADA` | Personal ACTIVO salvo quien reporta (IN_APP) | Incidencia nueva, también las que abre el sistema (recogida fallida, abandono sin margen) |
+| `INCIDENCIA_EN_REVISION` · `INCIDENCIA_RESUELTA` | Quien la reportó | El personal la toma o la resuelve |
+| `ALERTA_VENCIMIENTO` | ASESOR_BANCO (IN_APP) | Lotes próximos a vencer |
+
+- Los avisos al personal son IN_APP: trabaja en el panel web, sin dispositivos push. `DONACION_EN_CAMINO` está sembrado, pero la API no lo emite.
+- Cancelar una ruta no tiene aviso propio. El personal solo cancela rutas de la flota, cuyas donaciones avisan con `DONACION_REPUBLICADA` o `DONACION_EXPIRADA`. La tarea `cancelar_rutas_vencidas` avisa por cada recogida (§7).
+
+### 9.4 Sincronización de la app móvil (`usuario:<uuid>`)
+
+La app (donante y voluntario) se entera de lo que cambian otros (el personal en el panel, otros voluntarios, las tareas programadas) sin salir de la pantalla. Cada usuario tiene un tópico privado `usuario:<uuid>` con el evento `sync`. El mensaje es solo un **aviso de invalidación**: la app vuelve a pedir el recurso por REST, donde la API aplica roles y propiedad. Migración `20261108000000_sincronizacion_canal_usuario.sql`.
+
+- **Quién lee** (`pol_rt_usuario_leer`): solo el dueño del tópico (`fn_rt_usuario_id(topic) = auth.uid()`), mientras su cuenta esté ACTIVA y no eliminada (`fn_rt_es_usuario_activo`). Como en §9.2, Realtime lo decide al unirse y al refrescar el token.
+- **Quién emite:** solo `fn_rt_sincronizar`, llamada desde disparadores SECURITY DEFINER. Ni los clientes ni la API (`app_backend`) pueden ejecutarla, y no hay política INSERT para estos tópicos (la de `ruta:<id>` no los cubre).
+- `banco:donaciones` (§9.1) y `ruta:<id>` (§9.2) no cambian. El panel sigue en `banco:donaciones`.
+
+**Contrato v1 del mensaje.** Solo identificadores para saber qué volver a pedir: sin datos de negocio ni `estado`. Las claves nulas no viajan, y un donante nunca recibe ids de donaciones de otros donantes.
+
+| Campo | Contenido |
+|---|---|
+| `v` | `1`. Lo pone `fn_rt_sincronizar` si falta. |
+| `entidad` | `donacion`, `asignacion`, `parada`, `ruta`, `notificacion` o `cuenta` |
+| `id`, `donacion_id`, `ruta_id`, `asignacion_id`, `tipo` | Opcionales |
+
+**Eficiencia.**
+
+- Disparadores AFTER filtrados por columna (`UPDATE OF … WHEN (… IS DISTINCT FROM …)`). Nunca emiten por la ubicación del voluntario, `usuario.ultimo_acceso_at`, `notificacion.estado_envio`/`leida_at`, `updated_at` ni las columnas de ETA u orden.
+- A lo sumo un aviso por `(usuario, entidad, id)` en cada transacción: `fn_rt_sincronizar` recuerda los enviados en la variable local `findfood.rt_sincronizados`.
+- El aviso no trae datos: la app vuelve a pedir por REST lo que tenga en pantalla.
+
+**Tablas que emiten.** El flujo de la donación avisa desde disparadores AFTER por fila (migración `20261108000001_sincronizacion_flujo.sql`). Un donante solo recibe `{ entidad: 'donacion', id }` de sus propias donaciones.
+
+| Tabla · cuándo | Quién recibe | `entidad` (ids extra) |
+|---|---|---|
+| `donacion` · INSERT no BORRADOR; cambio de `estado` | El donante y los voluntarios con una oferta viva o la asignación aceptada (`OFRECIDA`, `ACEPTADA`) | `donacion` |
+| `asignacion` · INSERT; cambio de `estado` | El voluntario de la oferta | `asignacion` (`donacion_id`, `ruta_id`) |
+| | El donante, solo cuando entra en `ACEPTADA` o sale de ella; nunca por oferta | `donacion` |
+| `parada_ruta` · INSERT; cambio de `estado` (nunca orden ni ETA) | El voluntario de la ruta | `parada` (`ruta_id`, `donacion_id`) |
+| | Los donantes de la parada, de las recogidas abiertas y de las ya recogidas camino al banco: su seguimiento depende de las demás paradas (§9.2) | `donacion` |
+| `ruta` · INSERT; cambio de `estado` o `geometria` | El voluntario de la ruta | `ruta` |
+
+- La flota del banco no usa la app: sin voluntario no hay aviso.
+- Cambiar solo `asignacion.ruta_id` (rutas que planifica el personal) no avisa: la misma transacción crea la ruta y sus paradas, que sí avisan.
+
+**Bandeja y cuenta.** Avisan solo a la persona dueña de la fila (migración `20261108000002_sincronizacion_cuenta_bandeja.sql`).
+
+| Tabla · cuándo | Quién recibe | `entidad` (ids extra) | Nunca avisa por |
+|---|---|---|---|
+| `notificacion` · INSERT | El destinatario (`usuario_id`) | `notificacion` (`tipo`: código de `tipo_notificacion`; `donacion_id`, `asignacion_id`) | `estado_envio`, `intentos`, `enviada_at` (envío del push), `leida_at` (marcar leída) |
+| `usuario` · cambio de `estado`, `debe_cambiar_password` o `deleted_at` | La propia persona | `cuenta` (`id`: su usuario) | `ultimo_acceso_at` (AuthGuard), `updated_at`, datos del perfil |
+| `usuario_rol` · INSERT; cambio de `activo` | La persona del rol | `cuenta` | — |
+| `voluntario` · INSERT; cambio de `estado_verificacion`, `disponible` o `deleted_at` | La persona voluntaria (`usuario_id`) | `cuenta` | `ultima_ubicacion`, `ultima_ubicacion_at`, `total_*`, `calificacion_promedio`, `updated_at` |
+
+- Aprobar una verificación cambia el rol y el perfil de voluntario en la misma transacción (DDL §17.2): un aviso de `cuenta` y otro de la notificación. Suspender también apaga `disponible`: un solo aviso.
+- Realtime autoriza al unirse y al refrescar el token, así que el aviso de una suspensión llega a un canal ya abierto. Al volver a pedir por REST, la app encuentra la cuenta bloqueada.
 
 ---
 
@@ -803,6 +876,8 @@ Errores con Sentry (`@sentry/nestjs`) y logs estructurados en JSON (`nestjs-pino
 | 08 | Google Routes para la operación, con *fallback* geodésico y N acotado. OSRM en contenedor **solo** para *benchmarks* | OSRM como motor de operación | Costo por uso de Google, vigilado en §16. Mantener el contenedor OSRM para las pruebas. |
 | 09 | Posición en vivo por *broadcast* efímero | Tabla de posiciones | Sin historial de recorrido (solo la muestra periódica) |
 | 10 | Sin DELETE para `app_backend` salvo tablas desechables | DELETE general | Correcciones por estado, no por borrado |
+
+**Adenda a ADR-05 (2026-11).** La app móvil usa el mismo mecanismo con un tópico privado por usuario, `usuario:<uuid>` (§9.4), en lugar de `postgres_changes` o de consultar la API más seguido. El mensaje es solo un aviso de invalidación: no abre lectura de tablas a los clientes ni duplica la autorización de la API. Costo aceptado: un disparador filtrado por columna en cada tabla que emite, y un segundo contrato de mensaje, versionado con `v`.
 
 ---
 
