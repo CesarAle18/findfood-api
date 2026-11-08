@@ -996,9 +996,11 @@ export class RuteoService {
   }
 
   /**
-   * Cancela una ruta que no ha iniciado. En rutas de voluntario las asignaciones
-   * siguen ACEPTADAS (se pueden reagrupar); en las de la flota, las donaciones
-   * vuelven a publicarse si la ventana lo permite.
+   * Cancela una ruta que no ha iniciado. Sea del voluntario o de la flota del
+   * banco, sus donaciones quedan libres: la asignación pasa a CANCELADA (no cuenta
+   * como abandono) y la donación vuelve a PUBLICADA, con aviso al donante
+   * (DONACION_REPUBLICADA) y una nueva oferta, o a EXPIRADA si la ventana ya no
+   * deja margen para otra recogida (DONACION_EXPIRADA).
    */
   async cancelar(usuario: UsuarioAutenticado, id: string) {
     const republicar: string[] = [];
@@ -1026,28 +1028,26 @@ export class RuteoService {
         nuevo: 'CANCELADA',
         usuarioId: usuario.id,
       });
-      if (ruta.voluntario_id) {
-        await tx.asignacion.updateMany({
-          where: { ruta_id: id, estado: 'ACEPTADA' },
-          data: { ruta_id: null },
-        });
-        return;
-      }
-      const flota = await tx.asignacion.findMany({
+      const motivo = ruta.voluntario_id
+        ? 'Ruta cancelada por el voluntario'
+        : 'Ruta de la flota cancelada';
+      const asignadas = await tx.asignacion.findMany({
         where: { ruta_id: id, estado: 'ACEPTADA' },
         select: { donacion_id: true },
       });
-      for (const { donacion_id } of flota) {
+      for (const { donacion_id } of asignadas) {
+        // Las paradas ya quedaron OMITIDA y la ruta CANCELADA: cerrarVigentes no
+        // vuelve a tocarlas. Sin aviso al voluntario: él mismo canceló o es la flota.
         await this.asignacion.cerrarVigentes(tx, donacion_id, 'CANCELADA', {
           usuarioId: usuario.id,
-          motivo: 'Ruta de la flota cancelada',
+          motivo,
         });
         const ok = await this.donaciones.reabrirPublicacion(
           tx,
           donacion_id,
           ['ASIGNADA'],
           usuario.id,
-          'Ruta de la flota cancelada',
+          motivo,
         );
         if (ok) republicar.push(donacion_id);
         else {
@@ -1055,7 +1055,7 @@ export class RuteoService {
             tx,
             donacion_id,
             ['ASIGNADA'],
-            'Ruta de la flota cancelada sin margen para otra recogida',
+            `${motivo} sin margen para otra recogida`,
             usuario.id,
           );
         }

@@ -66,7 +66,10 @@ describe('Ruteo', () => {
       .como(voluntario)
       .post(`/v1/asignaciones/${ofertaId}/aceptar`)
       .expect(200);
-    expect(r.body.ruta).toMatchObject({ estado: 'EN_CURSO', actualizada: true });
+    expect(r.body.ruta).toMatchObject({
+      estado: 'EN_CURSO',
+      actualizada: true,
+    });
     return { donacionId: id, rutaId: r.body.ruta.id };
   }
 
@@ -234,6 +237,81 @@ describe('Ruteo', () => {
         })
         .expect(200);
     }
+  });
+
+  it('el voluntario cancela su ruta sin iniciar: la donación vuelve a publicarse', async () => {
+    const { id, donante, ofertaId } = await publicada({
+      lat: ZONA.lat - 0.002,
+      lng: ZONA.lng + 0.002,
+    });
+    const aceptar = await ctx
+      .como(voluntario)
+      .post(`/v1/asignaciones/${ofertaId}/aceptar`)
+      .expect(200);
+    // La aceptación la mete en una ruta dinámica EN_CURSO (donación EN_RECOLECCION).
+    // Para tener una ruta de voluntario PLANIFICADA, se deja la asignación aceptada
+    // fuera de esa ruta, con la donación ASIGNADA, y el voluntario la agrupa a mano.
+    const dinamica = aceptar.body.ruta.id as string;
+    await ctx.sql.query(
+      `UPDATE parada_ruta SET estado = 'OMITIDA' WHERE ruta_id = $1`,
+      [dinamica],
+    );
+    await ctx.sql.query(
+      `UPDATE ruta SET estado = 'CANCELADA', cancelada_at = now() WHERE id = $1`,
+      [dinamica],
+    );
+    await ctx.sql.query(`UPDATE asignacion SET ruta_id = NULL WHERE id = $1`, [
+      ofertaId,
+    ]);
+    await ctx.sql.query(
+      `UPDATE donacion SET estado = 'ASIGNADA' WHERE id = $1`,
+      [id],
+    );
+    const propia = await ctx
+      .como(voluntario)
+      .post('/v1/rutas')
+      .send({ donacion_ids: [id] })
+      .expect(201);
+    expect(propia.body.estado).toBe('PLANIFICADA');
+
+    await ctx
+      .como(voluntario)
+      .post(`/v1/rutas/${propia.body.id}/cancelar`)
+      .expect(200);
+
+    // La donación queda libre: PUBLICADA, su asignación CANCELADA y el donante avisado.
+    const { rows: donacion } = await ctx.sql.query<{ estado: string }>(
+      `SELECT estado::text FROM donacion WHERE id = $1`,
+      [id],
+    );
+    expect(donacion[0].estado).toBe('PUBLICADA');
+    const { rows: asignacion } = await ctx.sql.query<{
+      estado: string;
+      ruta_id: string | null;
+    }>(`SELECT estado::text, ruta_id FROM asignacion WHERE id = $1`, [
+      ofertaId,
+    ]);
+    expect(asignacion[0]).toEqual({
+      estado: 'CANCELADA',
+      ruta_id: propia.body.id,
+    });
+    const { rows: avisos } = await ctx.sql.query<{ codigo: string }>(
+      `SELECT t.codigo
+         FROM notificacion n JOIN tipo_notificacion t ON t.id = n.tipo_notificacion_id
+        WHERE n.usuario_id = $1 AND n.donacion_id = $2
+        ORDER BY n.created_at, t.codigo`,
+      [donante.id, id],
+    );
+    expect(avisos.map((a) => a.codigo)).toContain('DONACION_REPUBLICADA');
+    expect((await ruta(propia.body.id)).estado).toBe('CANCELADA');
+
+    await ctx
+      .como(donante)
+      .post(`/v1/donaciones/${id}/cancelar`)
+      .send({
+        motivo_id: cat.motivo('CANCELACION_DONACION', 'CAMBIO_DE_PLANES'),
+      })
+      .expect(200);
   });
 
   it('una recogida fallida (donante ausente) abre una incidencia y la ruta continúa', async () => {
