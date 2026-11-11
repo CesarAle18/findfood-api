@@ -176,6 +176,17 @@ export class NotificacionesService {
     });
   }
 
+  /**
+   * Elimina una notificación de la bandeja del usuario; al ser la misma fila,
+   * también sale de la cola de envío push si aún estaba pendiente.
+   */
+  async eliminar(usuarioId: string, id: string): Promise<void> {
+    const { count } = await this.prisma.notificacion.deleteMany({
+      where: { id, usuario_id: usuarioId },
+    });
+    if (count === 0) throw noEncontrado('Notificación');
+  }
+
   async marcarTodasLeidas(
     usuarioId: string,
   ): Promise<{ actualizadas: number }> {
