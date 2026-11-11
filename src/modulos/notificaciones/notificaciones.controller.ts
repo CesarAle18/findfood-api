@@ -1,5 +1,6 @@
 import {
   Controller,
+  Delete,
   Get,
   HttpCode,
   Param,
@@ -57,5 +58,14 @@ export class NotificacionesController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<void> {
     await this.notificaciones.marcarLeida(usuario.id, id);
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  async eliminar(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<void> {
+    await this.notificaciones.eliminar(usuario.id, id);
   }
 }
