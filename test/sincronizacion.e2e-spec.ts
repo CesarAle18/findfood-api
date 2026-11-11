@@ -768,30 +768,6 @@ describe('Sincronización en tiempo real: canal usuario:<uuid>', () => {
       expect(await todos(desde)).toEqual([]);
     });
 
-    it('eliminar una notificación de la bandeja no avisa', async () => {
-      const desde = await marca();
-      const antes = await ctx
-        .como(volA)
-        .get('/v1/me/notificaciones')
-        .expect(200);
-      const id = antes.body.datos[0].id as string;
-      // Solo la persona dueña puede borrarla.
-      await ctx.como(volB).delete(`/v1/me/notificaciones/${id}`).expect(404);
-      await ctx.como(volA).delete(`/v1/me/notificaciones/${id}`).expect(204);
-      const despues = await ctx
-        .como(volA)
-        .get('/v1/me/notificaciones')
-        .expect(200);
-      expect(despues.body.total).toBe(antes.body.total - 1);
-      expect(despues.body.datos.map((n: { id: string }) => n.id)).not.toContain(
-        id,
-      );
-      // La segunda vez ya no existe.
-      await ctx.como(volA).delete(`/v1/me/notificaciones/${id}`).expect(404);
-
-      expect(await todos(desde)).toEqual([]);
-    });
-
     it('la ubicación, el último acceso y los contadores no avisan', async () => {
       const desde = await marca();
       await ctx
@@ -922,6 +898,32 @@ describe('Sincronización en tiempo real: canal usuario:<uuid>', () => {
         expect(payload.v).toBe(1);
         expect(topic).toBe(esperado);
       }
+    });
+
+    // Va al final: la prueba anterior une cada aviso con su notificación, y una
+    // notificación borrada ya no tendría destinatario con el que comparar.
+    it('eliminar una notificación de la bandeja no avisa', async () => {
+      const desde = await marca();
+      const antes = await ctx
+        .como(volA)
+        .get('/v1/me/notificaciones')
+        .expect(200);
+      const id = antes.body.datos[0].id as string;
+      // Solo la persona dueña puede borrarla.
+      await ctx.como(volB).delete(`/v1/me/notificaciones/${id}`).expect(404);
+      await ctx.como(volA).delete(`/v1/me/notificaciones/${id}`).expect(204);
+      const despues = await ctx
+        .como(volA)
+        .get('/v1/me/notificaciones')
+        .expect(200);
+      expect(despues.body.total).toBe(antes.body.total - 1);
+      expect(despues.body.datos.map((n: { id: string }) => n.id)).not.toContain(
+        id,
+      );
+      // La segunda vez ya no existe.
+      await ctx.como(volA).delete(`/v1/me/notificaciones/${id}`).expect(404);
+
+      expect(await todos(desde)).toEqual([]);
     });
   });
 });
