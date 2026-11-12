@@ -936,7 +936,15 @@ export class RuteoService {
     });
   }
 
-  /** Recogida imposible (p. ej. donante ausente): parada FALLIDA + incidencia. */
+  
+  /**
+   * Recogida imposible (p. ej. donante ausente):
+   * marca la parada como FALLIDA y registra una incidencia.
+   *
+   * Si la ruta queda sin recogidas pendientes ni completadas,
+   * se cancela automáticamente para evitar enviar al
+   * voluntario al banco sin alimentos.
+   */
   async fallida(
     usuario: UsuarioAutenticado,
     paradaId: string,
@@ -944,15 +952,23 @@ export class RuteoService {
   ) {
     await this.prisma.transaccion(async (tx) => {
       const p = await this.bloquearParada(tx, paradaId);
+
       this.exigirEjecutor(usuario, p);
+
       if (p.tipo !== 'RECOGIDA') {
         throw noProcesable(
           'parada-no-recogida',
           'Solo una recogida puede marcarse como fallida',
         );
       }
-      if (p.estado !== 'EN_CURSO')
-        throw conflicto('ruta-no-en-curso', 'La ruta no está en curso');
+
+      if (p.estado !== 'EN_CURSO') {
+        throw conflicto(
+          'ruta-no-en-curso',
+          'La ruta no está en curso',
+        );
+      }
+
       if (!['PENDIENTE', 'EN_SITIO'].includes(p.parada_estado)) {
         throw conflicto(
           'parada-cerrada',
@@ -960,10 +976,17 @@ export class RuteoService {
           `Estado: ${p.parada_estado}`,
         );
       }
+
+      // 1. Marcar la recogida como fallida.
       await tx.parada_ruta.update({
         where: { id: paradaId },
-        data: { estado: 'FALLIDA', observaciones: dto.descripcion },
+        data: {
+          estado: 'FALLIDA',
+          observaciones: dto.descripcion,
+        },
       });
+
+      // 2. Registrar trazabilidad de la parada.
       await this.trazabilidad.registrar(tx, {
         ambito: 'PARADA',
         entidad: { paradaId },
@@ -973,6 +996,8 @@ export class RuteoService {
         motivo: dto.descripcion,
         ubicacion: dto.ubicacion,
       });
+
+      // 3. Registrar la incidencia correspondiente.
       await this.incidencias.registrar(tx, {
         tipoId: dto.tipo_incidencia_id,
         descripcion: dto.descripcion,
@@ -981,19 +1006,108 @@ export class RuteoService {
         donacion_id: p.donacion_id!,
         ubicacion: dto.ubicacion,
       });
-      // La donación sigue abierta: el personal la cancela o la reasigna (§6.7).
-      const donacion = await this.donaciones.bloquear(tx, p.donacion_id!);
+
+      // 4. Notificar al donante.
+      // La donación sigue pendiente de resolución por el banco.
+      const donacion = await this.donaciones.bloquear(
+        tx,
+        p.donacion_id!,
+      );
+
       if (donacion && donacion.donante_usuario_id !== usuario.id) {
         await this.notificaciones.encolar(tx, {
           usuarioId: donacion.donante_usuario_id,
           codigo: 'RECOGIDA_FALLIDA',
           donacionId: p.donacion_id!,
-          variables: { codigo: donacion.codigo },
+          variables: {
+            codigo: donacion.codigo,
+          },
+        });
+      }
+
+      // 5. Comprobar si la ruta todavía tiene recogidas útiles.
+      // PENDIENTE y EN_SITIO: todavía pueden realizarse.
+      // COMPLETADA: ya hay alimentos que deben entregarse.
+      const recogidasUtiles = await tx.parada_ruta.count({
+        where: {
+          ruta_id: p.ruta_id,
+          tipo: 'RECOGIDA',
+          estado: {
+            in: ['PENDIENTE', 'EN_SITIO', 'COMPLETADA'],
+          },
+        },
+      });
+
+      // 6. Cancelar únicamente si ya no hay recogidas útiles.
+      if (recogidasUtiles === 0) {
+        // Omitir las paradas que todavía estén abiertas,
+        // incluyendo la entrega al banco de alimentos.
+        const paradasOmitidas = await tx.parada_ruta.findMany({
+          where: {
+            ruta_id: p.ruta_id,
+            estado: {
+              in: ['PENDIENTE', 'EN_SITIO'],
+            },
+          },
+          select: {
+            id: true,
+            estado: true,
+          },
+        });
+
+        await tx.parada_ruta.updateMany({
+          where: {
+            ruta_id: p.ruta_id,
+            estado: {
+              in: ['PENDIENTE', 'EN_SITIO'],
+            },
+          },
+          data: {
+            estado: 'OMITIDA',
+          },
+        });
+
+        // Registrar trazabilidad de cada parada omitida.
+        for (const parada of paradasOmitidas) {
+          await this.trazabilidad.registrar(tx, {
+            ambito: 'PARADA',
+            entidad: { paradaId: parada.id },
+            anterior: parada.estado,
+            nuevo: 'OMITIDA',
+            usuarioId: usuario.id,
+            motivo: 'Ruta cancelada por falta de recogidas útiles',
+          });
+        }
+
+        // 7. Cancelar la ruta completa.
+        await tx.ruta.update({
+          where: {
+            id: p.ruta_id,
+          },
+          data: {
+            estado: 'CANCELADA',
+            cancelada_at: new Date(),
+          },
+        });
+
+        // 8. Registrar la cancelación en la trazabilidad.
+        await this.trazabilidad.registrar(tx, {
+          ambito: 'RUTA',
+          entidad: {
+            rutaId: p.ruta_id,
+          },
+          anterior: 'EN_CURSO',
+          nuevo: 'CANCELADA',
+          usuarioId: usuario.id,
+          motivo: 'Ruta sin recogidas disponibles para entregar',
         });
       }
     });
+
+    // Conservar el contrato de respuesta existente.
     return this.parada(paradaId);
   }
+
 
   /**
    * Cancela una ruta que no ha iniciado. Sea del voluntario o de la flota del

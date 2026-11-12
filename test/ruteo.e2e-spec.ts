@@ -314,14 +314,17 @@ describe('Ruteo', () => {
       .expect(200);
   });
 
-  it('una recogida fallida (donante ausente) abre una incidencia y la ruta continúa', async () => {
+  
+  it('cancela la ruta cuando falla su única recogida', async () => {
     const { donacionId: donacion, rutaId } = await asignada({
       lat: ZONA.lat + 0.003,
       lng: ZONA.lng - 0.003,
     });
+
     const [recogida, entrega] = (await ruta(rutaId)).paradas;
 
-    const r = await ctx
+    // El voluntario reporta que no pudo recoger la donación.
+    const respuesta = await ctx
       .como(voluntario)
       .post(`/v1/paradas/${recogida.id}/fallida`)
       .send({
@@ -329,45 +332,42 @@ describe('Ruteo', () => {
         descripcion: 'Nadie abrió en 20 minutos',
       })
       .expect(200);
-    expect(r.body.estado).toBe('FALLIDA');
 
+    expect(respuesta.body.estado).toBe('FALLIDA');
+
+    // La ruta debe cancelarse automáticamente.
+    const rutaActualizada = await ruta(rutaId);
+
+    expect(rutaActualizada.estado).toBe('CANCELADA');
+
+    const paradaRecogida = rutaActualizada.paradas.find(
+      (p: { id: string }) => p.id === recogida.id,
+    );
+
+    const paradaEntrega = rutaActualizada.paradas.find(
+      (p: { id: string }) => p.id === entrega.id,
+    );
+
+    expect(paradaRecogida?.estado).toBe('FALLIDA');
+    expect(paradaEntrega?.estado).toBe('OMITIDA');
+
+    // La incidencia debe seguir existiendo.
     const incidencias = await ctx
       .como(voluntario)
       .get(`/v1/incidencias?donacion_id=${donacion}`)
       .expect(200);
+
     expect(incidencias.body.datos[0]).toMatchObject({
       estado: 'ABIERTA',
       parada_id: recogida.id,
-      tipo_incidencia: { codigo: 'DONANTE_AUSENTE', bloquea_donacion: true },
+      tipo_incidencia: {
+        codigo: 'DONANTE_AUSENTE',
+        bloquea_donacion: true,
+      },
     });
 
-    // El banco decide: cancelar la donación (el ADMIN puede en recolección).
-    await ctx
-      .como(admin)
-      .post(`/v1/donaciones/${donacion}/cancelar`)
-      .send({
-        motivo_id: cat.motivo('CANCELACION_DONACION', 'CANCELADA_POR_BANCO'),
-        observacion: 'Donante ausente',
-      })
-      .expect(200);
-    await ctx
-      .como(admin)
-      .post(`/v1/incidencias/${incidencias.body.datos[0].id}/resolver`)
-      .send({ resolucion: 'Donación cancelada por ausencia del donante' })
-      .expect(200);
-
-    // Sin nada recogido, la entrega cierra la ruta sin entregar donaciones.
-    await ctx
-      .como(voluntario)
-      .post('/v1/evidencias')
-      .send({
-        id: 'b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e',
-        tipo: 'ENTREGA',
-        ruta: await ctx.ruta(voluntario, 'EVIDENCIA'),
-        parada_id: entrega.id,
-        capturada_at: new Date().toISOString(),
-      })
-      .expect(201);
+    // El voluntario no puede confirmar una entrega
+    // después de haberse cancelado la ruta.
     await ctx
       .como(voluntario)
       .post(`/v1/paradas/${entrega.id}/confirmar`)
@@ -375,9 +375,12 @@ describe('Ruteo', () => {
         confirmacion_manual: true,
         confirmada_en_dispositivo: new Date().toISOString(),
       })
-      .expect(200);
-    expect((await ruta(rutaId)).estado).toBe('COMPLETADA');
+      .expect(409);
+
+    // La ruta no debe cambiar a COMPLETADA.
+    expect((await ruta(rutaId)).estado).toBe('CANCELADA');
   });
+
 
   it('la recogida registra el estado del producto; la entrega lo rechaza (API-10)', async () => {
     const { rutaId } = await asignada({
