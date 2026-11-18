@@ -96,8 +96,17 @@ export class RutasDinamicasService {
    * transacción y nunca cambia el orden. Si Google no responde, la ruta queda sin trazado y
    * el panel une las paradas en línea recta. Si otra aceptación reordenó las paradas mientras
    * Google respondía, no escribe: ese recálculo es el vigente.
+   *
+   * Guarda la distancia del tramo trazado como distancia total, salvo con
+   * `conservarDistancia`: al retrazar tras cerrar una parada solo cambia la
+   * geometría, y la distancia sigue siendo la planificada, coherente con
+   * duracion_estimada_min.
    */
-  async trazar(rutaId: string, origen: Coordenada): Promise<void> {
+  async trazar(
+    rutaId: string,
+    origen: Coordenada,
+    op: { conservarDistancia?: boolean } = {},
+  ): Promise<void> {
     if (!this.google.disponible) return;
     const paradas = await this.prisma.$queryRaw<
       (Coordenada & { id: string })[]
@@ -110,10 +119,14 @@ export class RutasDinamicasService {
     const trazado = await this.google.ruta([origen, ...paradas]);
     if (!trazado) return;
     const firma = paradas.map((p) => p.id).join(',');
+    // NULL deja la distancia que ya tenía la ruta (COALESCE).
+    const distanciaKm = op.conservarDistancia
+      ? null
+      : Math.round(trazado.distanciaKm * 100) / 100;
     const escritas = await this.prisma.$executeRaw`
       UPDATE ruta
          SET geometria = ST_SetSRID(ST_LineFromEncodedPolyline(${trazado.polilinea}), 4326),
-             distancia_total_km = ${Math.round(trazado.distanciaKm * 100) / 100}::numeric,
+             distancia_total_km = COALESCE(${distanciaKm}::numeric, distancia_total_km),
              proveedor_ruteo = 'GOOGLE'
        WHERE id = ${rutaId}::uuid AND estado IN ('PLANIFICADA','EN_CURSO')
          AND (SELECT string_agg(id::text, ',' ORDER BY orden) FROM parada_ruta

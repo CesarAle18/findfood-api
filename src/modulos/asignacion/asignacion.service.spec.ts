@@ -85,7 +85,9 @@ describe('AsignacionService: retrazar el tramo pendiente', () => {
     const { servicio, rutasDinamicas } = setup();
     rutasDinamicas.trazar.mockRejectedValue(new Error('Google caído'));
     expect(servicio.retrazarPendiente('r1', parada)).toBeUndefined();
-    expect(rutasDinamicas.trazar).toHaveBeenCalledWith('r1', parada);
+    expect(rutasDinamicas.trazar).toHaveBeenCalledWith('r1', parada, {
+      conservarDistancia: true,
+    });
     await enSegundoPlano();
     expect(advertencia).toHaveBeenCalledWith(
       expect.objectContaining({ rutaId: 'r1' }),
@@ -97,7 +99,9 @@ describe('AsignacionService: retrazar el tramo pendiente', () => {
     const { servicio, rutasDinamicas } = setup();
     await servicio.abandonar(voluntario, 'as1', { motivo_id: 1 });
     expect(rutasDinamicas.trazar).toHaveBeenCalledTimes(1);
-    expect(rutasDinamicas.trazar).toHaveBeenCalledWith('r1', parada);
+    expect(rutasDinamicas.trazar).toHaveBeenCalledWith('r1', parada, {
+      conservarDistancia: true,
+    });
   });
 
   it('abandonar responde aunque el retrazado falle', async () => {

@@ -79,11 +79,12 @@ export class AsignacionService {
    * que la geometría no conserve el origen de la planificación ni los tramos ya
    * recorridos. Se llama tras confirmar la transacción y en segundo plano:
    * depende de Google y nunca hace fallar la petición. Si la ruta ya no tiene
-   * paradas pendientes, trazar() no hace nada.
+   * paradas pendientes, trazar() no hace nada. Conserva la distancia total
+   * planificada: solo se redibuja el camino que falta.
    */
   retrazarPendiente(rutaId: string, desde: Coordenada): void {
     void this.rutasDinamicas
-      .trazar(rutaId, desde)
+      .trazar(rutaId, desde, { conservarDistancia: true })
       .catch((err: unknown) =>
         this.logger.warn({ err, rutaId }, 'No se pudo retrazar la ruta'),
       );
