@@ -308,9 +308,11 @@ export class RuteoService {
     const ordenadas = optimizada.orden.map((i) => donaciones[i - 1]);
     const recorrido = [origen, ...ordenadas, almacen];
     const trazado = await this.google.ruta(recorrido);
+    // Sin trazado por calles no hay geometría: una línea recta entre paradas se
+    // dibujaría como si fuera el camino. El cliente muestra solo las paradas.
     const geometria = trazado
       ? Prisma.sql`ST_SetSRID(ST_LineFromEncodedPolyline(${trazado.polilinea}), 4326)`
-      : Prisma.sql`ST_GeomFromText(${`LINESTRING(${recorrido.map((p) => `${p.lng} ${p.lat}`).join(', ')})`}, 4326)`;
+      : Prisma.sql`NULL`;
     let distanciaTotal = 0;
     for (let i = 1; i < recorrido.length; i++)
       distanciaTotal += distanciaKm(recorrido[i - 1], recorrido[i]);
@@ -336,7 +338,7 @@ export class RuteoService {
           ${fechaSinHora([...fechas][0])}::date,
           ${Math.round((trazado?.distanciaKm ?? distanciaTotal) * 100) / 100}::numeric,
           ${Math.round(optimizada.totalMin)}::int, ${Math.round(pesoTotal * 100) / 100}::numeric,
-          ${geometria}, ${matriz || trazado ? 'GOOGLE' : null})
+          ${geometria}, ${trazado ? 'GOOGLE' : null})
         RETURNING id`;
 
       for (const [k, d] of ordenadas.entries()) {
