@@ -49,6 +49,26 @@ describe('GoogleRoutesService', () => {
     expect(body.intermediates).toEqual([ubicacion(1)]);
   });
 
+  it('pide la polilínea de alta calidad (OVERVIEW recorta las cuadras)', async () => {
+    const fetchMock = jest.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          routes: [
+            {
+              duration: '60s',
+              distanceMeters: 500,
+              polyline: { encodedPolyline: 'ruta' },
+            },
+          ],
+        }),
+      ),
+    );
+    await servicio.ruta(puntos);
+    const body = JSON.parse(fetchMock.mock.calls[0][1]!.body as string);
+    expect(body.polylineQuality).toBe('HIGH_QUALITY');
+    expect(body.polylineEncoding).toBe('ENCODED_POLYLINE');
+  });
+
   it('conserva el contenedor waypoint requerido por la matriz', async () => {
     const fetchMock = jest.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(

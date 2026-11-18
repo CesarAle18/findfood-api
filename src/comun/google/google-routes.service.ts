@@ -140,6 +140,9 @@ export class GoogleRoutesService {
           intermediates: puntos.slice(1, -1).map(waypoint),
           travelMode: 'DRIVE',
           routingPreference: 'TRAFFIC_AWARE',
+          // OVERVIEW (el predeterminado) simplifica la línea y corta las
+          // cuadras en el mapa; HIGH_QUALITY sigue las calles.
+          polylineQuality: 'HIGH_QUALITY',
           polylineEncoding: 'ENCODED_POLYLINE',
         }),
       });
