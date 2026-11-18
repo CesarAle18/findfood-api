@@ -12,7 +12,10 @@ import type { NotificacionesService } from '../notificaciones/notificaciones.ser
 import type { ParametrosService } from '../parametros/parametros.service';
 import { RuteoService } from './ruteo.service';
 
-type Consulta = jest.Mock<Promise<unknown>, [TemplateStringsArray, ...unknown[]]>;
+type Consulta = jest.Mock<
+  Promise<unknown>,
+  [TemplateStringsArray, ...unknown[]]
+>;
 
 /** Texto de una consulta etiquetada ($queryRaw`...`) para despachar el mock. */
 const texto = (partes: TemplateStringsArray) => partes.join('?');
@@ -63,17 +66,20 @@ function setup() {
     iniciada_at: new Date(),
   };
   const tx = {
-    $queryRaw: jest.fn((partes: TemplateStringsArray, ...valores: unknown[]) => {
-      const sql = texto(partes);
-      if (sql.includes('FROM donacion d JOIN donante'))
-        return Promise.resolve([donacion]);
-      if (sql.includes('INSERT INTO ruta')) {
-        insertRuta.push(valores);
-        return Promise.resolve([{ id: 'r1' }]);
-      }
-      if (sql.includes('FROM parada_ruta p')) return Promise.resolve([parada]);
-      return Promise.resolve([]);
-    }) as Consulta,
+    $queryRaw: jest.fn(
+      (partes: TemplateStringsArray, ...valores: unknown[]) => {
+        const sql = texto(partes);
+        if (sql.includes('FROM donacion d JOIN donante'))
+          return Promise.resolve([donacion]);
+        if (sql.includes('INSERT INTO ruta')) {
+          insertRuta.push(valores);
+          return Promise.resolve([{ id: 'r1' }]);
+        }
+        if (sql.includes('FROM parada_ruta p'))
+          return Promise.resolve([parada]);
+        return Promise.resolve([]);
+      },
+    ) as Consulta,
     $executeRaw: jest.fn().mockResolvedValue(1),
     parada_ruta: {
       update: jest.fn().mockResolvedValue({}),
@@ -90,7 +96,9 @@ function setup() {
       if (sql.includes('FROM donacion d JOIN donante'))
         return Promise.resolve([donacion]);
       if (sql.includes('FROM banco_alimentos'))
-        return Promise.resolve([{ id: 'b1', tiene_flota_propia: true, ...origen }]);
+        return Promise.resolve([
+          { id: 'b1', tiene_flota_propia: true, ...origen },
+        ]);
       if (sql.includes('FROM almacen')) return Promise.resolve([almacen]);
       return Promise.resolve([{ id: 'p1' }]);
     }) as Consulta,
@@ -105,6 +113,7 @@ function setup() {
   };
   const asignacion = {
     asignarAFlota: jest.fn().mockResolvedValue('as1'),
+    completar: jest.fn().mockResolvedValue(undefined),
     retrazarPendiente: jest.fn(),
   };
   const donaciones = {
@@ -160,5 +169,71 @@ describe('RuteoService.crear: geometría planificada', () => {
     expect(geometria.sql).toContain('ST_LineFromEncodedPolyline');
     expect(geometria.values).toEqual(['abc']);
     expect(proveedor).toBe('GOOGLE');
+  });
+});
+
+describe('RuteoService: retrazar el tramo pendiente al cerrar una parada', () => {
+  const confirmacion = {
+    peso_confirmado_kg: 8,
+    confirmacion_manual: true,
+    confirmada_en_dispositivo: new Date().toISOString(),
+  };
+  const fallo = { tipo_incidencia_id: 1, descripcion: 'Donante ausente' };
+
+  it('confirmar una recogida retraza desde la parada cerrada, después de la transacción', async () => {
+    const { servicio, asignacion, parada, tx } = setup();
+    asignacion.retrazarPendiente.mockImplementation(() => {
+      // La transacción ya terminó: el UPDATE de la parada se ejecutó antes.
+      expect(tx.$executeRaw).toHaveBeenCalled();
+    });
+    await servicio.confirmar(voluntario, parada.parada_id, confirmacion);
+    expect(asignacion.retrazarPendiente).toHaveBeenCalledTimes(1);
+    expect(asignacion.retrazarPendiente).toHaveBeenCalledWith('r1', {
+      lat: donacion.lat,
+      lng: donacion.lng,
+    });
+  });
+
+  it('repetir la confirmación propia no retraza: nada cambió', async () => {
+    const { servicio, asignacion, parada } = setup();
+    parada.parada_estado = 'COMPLETADA';
+    parada.confirmada_por = voluntario.id;
+    await servicio.confirmar(voluntario, parada.parada_id, confirmacion);
+    expect(asignacion.retrazarPendiente).not.toHaveBeenCalled();
+  });
+
+  it('confirmar la entrega no retraza: la ruta termina', async () => {
+    const { servicio, asignacion, parada } = setup();
+    parada.tipo = 'ENTREGA';
+    await servicio.confirmar(voluntario, parada.parada_id, {
+      ...confirmacion,
+      peso_confirmado_kg: undefined,
+    });
+    expect(asignacion.retrazarPendiente).not.toHaveBeenCalled();
+  });
+
+  it('marcar una recogida fallida retraza desde la parada cerrada', async () => {
+    const { servicio, asignacion, parada } = setup();
+    await servicio.fallida(voluntario, parada.parada_id, fallo as never);
+    expect(asignacion.retrazarPendiente).toHaveBeenCalledWith('r1', {
+      lat: donacion.lat,
+      lng: donacion.lng,
+    });
+  });
+
+  it('una recogida fallida que cancela la ruta no retraza', async () => {
+    const { servicio, asignacion, parada, tx } = setup();
+    tx.parada_ruta.count.mockResolvedValue(0);
+    await servicio.fallida(voluntario, parada.parada_id, fallo as never);
+    expect(asignacion.retrazarPendiente).not.toHaveBeenCalled();
+  });
+
+  it('si la transacción falla no retraza', async () => {
+    const { servicio, asignacion, parada, tx } = setup();
+    tx.parada_ruta.update.mockRejectedValue(new Error('bd caída'));
+    await expect(
+      servicio.fallida(voluntario, parada.parada_id, fallo as never),
+    ).rejects.toThrow('bd caída');
+    expect(asignacion.retrazarPendiente).not.toHaveBeenCalled();
   });
 });

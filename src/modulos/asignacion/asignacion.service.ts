@@ -7,6 +7,7 @@ import {
   noProcesable,
 } from '../../comun/http/problema';
 import { validarAspectos } from '../../comun/aspectos';
+import type { Coordenada } from '../../comun/geo';
 import { validarMotivo } from '../../comun/motivos';
 import { PrismaService, type Tx } from '../../comun/prisma/prisma.service';
 import { TrazabilidadService } from '../../comun/trazabilidad/trazabilidad.service';
@@ -65,6 +66,21 @@ export class AsignacionService {
         'No se pudo reofrecer la donación',
       );
     }
+  }
+
+  /**
+   * Retraza por calles el tramo pendiente desde una parada recién cerrada, para
+   * que la geometría no conserve el origen de la planificación ni los tramos ya
+   * recorridos. Se llama tras confirmar la transacción y en segundo plano:
+   * depende de Google y nunca hace fallar la petición. Si la ruta ya no tiene
+   * paradas pendientes, trazar() no hace nada.
+   */
+  retrazarPendiente(rutaId: string, desde: Coordenada): void {
+    void this.rutasDinamicas
+      .trazar(rutaId, desde)
+      .catch((err: unknown) =>
+        this.logger.warn({ err, rutaId }, 'No se pudo retrazar la ruta'),
+      );
   }
 
   // ===========================================================================
@@ -140,14 +156,17 @@ export class AsignacionService {
     return cerradas.length;
   }
 
+  /** Devuelve la ubicación de la parada omitida (null si ya estaba cerrada). */
   private async omitirParada(
     tx: Tx,
     rutaId: string,
     donacionId: string,
     usuarioId?: string | null,
     motivo?: string,
-  ): Promise<void> {
-    const paradas = await tx.$queryRaw<{ id: string; anterior: string }[]>`
+  ): Promise<Coordenada | null> {
+    const paradas = await tx.$queryRaw<
+      (Coordenada & { id: string; anterior: string })[]
+    >`
       WITH previas AS (
         SELECT id, estado FROM parada_ruta
          WHERE ruta_id = ${rutaId}::uuid AND donacion_id = ${donacionId}::uuid
@@ -155,7 +174,8 @@ export class AsignacionService {
          FOR UPDATE)
       UPDATE parada_ruta p SET estado = 'OMITIDA'
         FROM previas x WHERE p.id = x.id
-      RETURNING p.id, x.estado::text AS anterior`;
+      RETURNING p.id, x.estado::text AS anterior,
+                ST_Y(p.ubicacion::geometry) AS lat, ST_X(p.ubicacion::geometry) AS lng`;
     for (const p of paradas) {
       await this.trazabilidad.registrar(tx, {
         ambito: 'PARADA',
@@ -166,6 +186,8 @@ export class AsignacionService {
         motivo,
       });
     }
+    const [omitida] = paradas;
+    return omitida ? { lat: omitida.lat, lng: omitida.lng } : null;
   }
 
   /**
@@ -537,7 +559,7 @@ export class AsignacionService {
     dto: RespuestaConMotivoDto,
   ) {
     const voluntario = await this.voluntarios.propio(usuario.id);
-    const { donacionId, republicada } = await this.prisma.transaccion(
+    const { donacionId, republicada, retrazo } = await this.prisma.transaccion(
       async (tx) => {
         const motivo = await validarMotivo(
           tx,
@@ -594,8 +616,9 @@ export class AsignacionService {
           usuarioId: usuario.id,
           motivo: motivo.nombre,
         });
+        let omitida: Coordenada | null = null;
         if (a.ruta_id) {
-          await this.omitirParada(
+          omitida = await this.omitirParada(
             tx,
             a.ruta_id,
             a.donacion_id,
@@ -636,9 +659,16 @@ export class AsignacionService {
             asignacion_id: id,
           });
         }
-        return { donacionId: a.donacion_id, republicada };
+        return {
+          donacionId: a.donacion_id,
+          republicada,
+          retrazo:
+            a.ruta_id && omitida ? { rutaId: a.ruta_id, desde: omitida } : null,
+        };
       },
     );
+    // Si la ruta se canceló por quedar vacía, trazar() no encuentra paradas pendientes.
+    if (retrazo) this.retrazarPendiente(retrazo.rutaId, retrazo.desde);
     if (republicada) await this.continuarOferta(donacionId);
     return { id, estado: 'ABANDONADA', donacion_republicada: republicada };
   }

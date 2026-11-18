@@ -740,7 +740,7 @@ export class RuteoService {
       );
     }
 
-    await this.prisma.transaccion(async (tx) => {
+    const cerrada = await this.prisma.transaccion(async (tx) => {
       const p = await this.bloquearParada(tx, paradaId);
       this.exigirEjecutor(usuario, p, p.tipo === 'ENTREGA');
       if (p.tipo !== 'RECOGIDA' && dto.estado_producto != null) {
@@ -750,7 +750,7 @@ export class RuteoService {
         );
       }
       if (p.parada_estado === 'COMPLETADA') {
-        if (p.confirmada_por === usuario.id) return;
+        if (p.confirmada_por === usuario.id) return null;
         throw conflicto(
           'parada-cerrada',
           'La parada ya fue confirmada por otra persona',
@@ -775,10 +775,17 @@ export class RuteoService {
 
       if (p.tipo === 'RECOGIDA') {
         await this.confirmarRecogida(tx, usuario, p, dto);
-      } else {
-        await this.confirmarEntrega(tx, usuario, p, dto);
+        return p;
       }
+      // La entrega cierra la ruta: no queda tramo pendiente que retrazar.
+      await this.confirmarEntrega(tx, usuario, p, dto);
+      return null;
     });
+    if (cerrada)
+      this.asignacion.retrazarPendiente(cerrada.ruta_id, {
+        lat: cerrada.lat,
+        lng: cerrada.lng,
+      });
     return this.parada(paradaId);
   }
 
@@ -952,7 +959,7 @@ export class RuteoService {
     paradaId: string,
     dto: ParadaFallidaDto,
   ) {
-    await this.prisma.transaccion(async (tx) => {
+    const cerrada = await this.prisma.transaccion(async (tx) => {
       const p = await this.bloquearParada(tx, paradaId);
 
       this.exigirEjecutor(usuario, p);
@@ -1103,8 +1110,17 @@ export class RuteoService {
           usuarioId: usuario.id,
           motivo: 'Ruta sin recogidas disponibles para entregar',
         });
+        return null;
       }
+      return p;
     });
+
+    // 9. Fuera de la transacción: el tramo pendiente parte de la parada fallida.
+    if (cerrada)
+      this.asignacion.retrazarPendiente(cerrada.ruta_id, {
+        lat: cerrada.lat,
+        lng: cerrada.lng,
+      });
 
     // Conservar el contrato de respuesta existente.
     return this.parada(paradaId);
