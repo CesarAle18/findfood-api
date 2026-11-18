@@ -21,7 +21,7 @@ const enSegundoPlano = () => new Promise((r) => setImmediate(r));
 
 function setup() {
   const tx = {
-    $queryRaw: jest.fn((partes: TemplateStringsArray) => {
+    $queryRaw: jest.fn((partes: TemplateStringsArray): Promise<unknown[]> => {
       const sql = texto(partes);
       if (sql.includes('FROM asignacion WHERE id'))
         return Promise.resolve([
@@ -119,5 +119,41 @@ describe('AsignacionService: retrazar el tramo pendiente', () => {
     );
     await servicio.abandonar(voluntario, 'as1', { motivo_id: 1 });
     expect(rutasDinamicas.trazar).not.toHaveBeenCalled();
+  });
+});
+
+describe('AsignacionService.cerrarVigentes: paradas omitidas para retrazar', () => {
+  const cerrada = (ruta_id: string | null) => ({
+    id: 'as1',
+    anterior: 'ACEPTADA',
+    voluntario_id: null,
+    ruta_id,
+  });
+
+  it('devuelve la ruta y la ubicación de la parada que quedó OMITIDA', async () => {
+    const { servicio, tx } = setup();
+    const original = tx.$queryRaw.getMockImplementation()!;
+    tx.$queryRaw.mockImplementation((partes: TemplateStringsArray) =>
+      texto(partes).includes('UPDATE asignacion a')
+        ? Promise.resolve([cerrada('r1')])
+        : original(partes),
+    );
+    await expect(
+      servicio.cerrarVigentes(tx as never, 'd1', 'CANCELADA'),
+    ).resolves.toEqual([{ rutaId: 'r1', desde: parada }]);
+  });
+
+  it('no devuelve nada si la asignación no estaba en una ruta o su parada ya estaba cerrada', async () => {
+    const { servicio, tx } = setup();
+    tx.$queryRaw.mockImplementation((partes: TemplateStringsArray) => {
+      const sql = texto(partes);
+      if (sql.includes('UPDATE asignacion a'))
+        return Promise.resolve([cerrada(null), cerrada('r2')]);
+      // La parada de r2 ya no estaba PENDIENTE ni EN_SITIO.
+      return Promise.resolve([]);
+    });
+    await expect(
+      servicio.cerrarVigentes(tx as never, 'd1', 'EXPIRADA'),
+    ).resolves.toEqual([]);
   });
 });

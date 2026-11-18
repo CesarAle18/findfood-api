@@ -35,6 +35,12 @@ export interface OpcionesCierre {
   conservarRuta?: boolean;
 }
 
+/** Ruta que perdió una parada abierta: se retraza desde ella tras confirmar. */
+export interface RetrazoPendiente {
+  rutaId: string;
+  desde: Coordenada;
+}
+
 @Injectable()
 export class AsignacionService {
   private readonly logger = new Logger(AsignacionService.name);
@@ -90,14 +96,15 @@ export class AsignacionService {
   /**
    * Cierra las asignaciones vivas de una donación (cancelación, reasignación,
    * expiración). Si la asignación ya estaba en una ruta, su parada de recogida
-   * queda OMITIDA.
+   * queda OMITIDA y se devuelve dónde estaba, para que el llamador retrace esa
+   * ruta (retrazarPendiente) cuando confirme su transacción.
    */
   async cerrarVigentes(
     tx: Tx,
     donacionId: string,
     estadoFinal: 'CANCELADA' | 'EXPIRADA',
     op: OpcionesCierre = {},
-  ): Promise<number> {
+  ): Promise<RetrazoPendiente[]> {
     const estados = op.estados ?? ['OFRECIDA', 'ACEPTADA'];
     const cerradas = await tx.$queryRaw<
       {
@@ -118,6 +125,7 @@ export class AsignacionService {
        WHERE a.id = p.id
       RETURNING a.id, p.estado::text AS anterior, a.voluntario_id, a.ruta_id`;
 
+    const retrazos: RetrazoPendiente[] = [];
     for (const a of cerradas) {
       await this.trazabilidad.registrar(tx, {
         ambito: 'ASIGNACION',
@@ -128,13 +136,14 @@ export class AsignacionService {
         motivo: op.motivo,
       });
       if (a.ruta_id) {
-        await this.omitirParada(
+        const omitida = await this.omitirParada(
           tx,
           a.ruta_id,
           donacionId,
           op.usuarioId,
           op.motivo,
         );
+        if (omitida) retrazos.push({ rutaId: a.ruta_id, desde: omitida });
         if (!op.conservarRuta)
           await this.cancelarRutaVacia(tx, a.ruta_id, op.usuarioId, op.motivo);
       }
@@ -153,7 +162,7 @@ export class AsignacionService {
         });
       }
     }
-    return cerradas.length;
+    return retrazos;
   }
 
   /** Devuelve la ubicación de la parada omitida (null si ya estaba cerrada). */

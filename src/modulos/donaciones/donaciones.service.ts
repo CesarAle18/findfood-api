@@ -19,7 +19,10 @@ import { TrazabilidadService } from '../../comun/trazabilidad/trazabilidad.servi
 import type { Pagina } from '../../comun/validacion';
 import { Prisma } from '../../generated/prisma/client';
 import type { estado_donacion } from '../../generated/prisma/enums';
-import { AsignacionService } from '../asignacion/asignacion.service';
+import {
+  AsignacionService,
+  type RetrazoPendiente,
+} from '../asignacion/asignacion.service';
 import { ArchivosService } from '../evidencias/archivos.service';
 import { NotificacionesService } from '../notificaciones/notificaciones.service';
 import { ParametrosService } from '../parametros/parametros.service';
@@ -198,7 +201,8 @@ export class DonacionesService {
    * EXPIRADA, se cierra su oferta viva y se avisa al donante.
    */
   async expirarPublicacionesVencidas(lote = 200): Promise<number> {
-    return this.prisma.$transaction(
+    const retrazos: RetrazoPendiente[] = [];
+    const expiradas = await this.prisma.$transaction(
       async (tx) => {
         const vencidas = await tx.$queryRaw<{ id: string }[]>`
           SELECT id FROM donacion
@@ -207,10 +211,12 @@ export class DonacionesService {
            LIMIT ${lote}
            FOR UPDATE SKIP LOCKED`;
         for (const { id } of vencidas) {
-          await this.asignacion.cerrarVigentes(tx, id, 'EXPIRADA', {
-            estados: ['OFRECIDA'],
-            motivo: 'Venció el plazo de la publicación',
-          });
+          retrazos.push(
+            ...(await this.asignacion.cerrarVigentes(tx, id, 'EXPIRADA', {
+              estados: ['OFRECIDA'],
+              motivo: 'Venció el plazo de la publicación',
+            })),
+          );
           await this.expirar(
             tx,
             id,
@@ -222,6 +228,14 @@ export class DonacionesService {
       },
       { maxWait: 5_000, timeout: 60_000 },
     );
+    this.retrazar(retrazos);
+    return expiradas;
+  }
+
+  /** Tras confirmar: retraza en segundo plano cada ruta que perdió una parada abierta. */
+  private retrazar(retrazos: RetrazoPendiente[]): void {
+    for (const r of retrazos)
+      this.asignacion.retrazarPendiente(r.rutaId, r.desde);
   }
 
   // ===========================================================================
@@ -912,7 +926,7 @@ export class DonacionesService {
     dto: CancelarDonacionDto,
   ) {
     const admin = tieneRol(usuario, 'ADMIN');
-    await this.prisma.transaccion(async (tx) => {
+    const retrazos = await this.prisma.transaccion(async (tx) => {
       const motivo = await validarMotivo(
         tx,
         dto.motivo_id,
@@ -937,11 +951,12 @@ export class DonacionesService {
           `Estado actual: ${actual.estado}`,
         );
       }
-      await this.asignacion.cerrarVigentes(tx, id, 'CANCELADA', {
-        usuarioId: usuario.id,
-        motivo: motivo.nombre,
-        notificar: true,
-      });
+      const omitidas = await this.asignacion.cerrarVigentes(
+        tx,
+        id,
+        'CANCELADA',
+        { usuarioId: usuario.id, motivo: motivo.nombre, notificar: true },
+      );
       await this.transicion(tx, {
         donacionId: id,
         desde: permitidos,
@@ -967,7 +982,9 @@ export class DonacionesService {
           },
         });
       }
+      return omitidas;
     });
+    this.retrazar(retrazos);
     return this.detalle(usuario, id);
   }
 
@@ -980,7 +997,7 @@ export class DonacionesService {
     id: string,
     observacion?: string,
   ) {
-    await this.prisma.transaccion(async (tx) => {
+    const retrazos = await this.prisma.transaccion(async (tx) => {
       const actual = await this.bloquear(tx, id);
       if (!actual) throw noEncontrado('Donación');
       const permitidos: estado_donacion[] = [
@@ -1003,11 +1020,12 @@ export class DonacionesService {
       }
       const motivo =
         observacion?.trim() || 'Reasignada por el banco de alimentos';
-      await this.asignacion.cerrarVigentes(tx, id, 'CANCELADA', {
-        usuarioId: usuario.id,
-        motivo,
-        notificar: true,
-      });
+      const omitidas = await this.asignacion.cerrarVigentes(
+        tx,
+        id,
+        'CANCELADA',
+        { usuarioId: usuario.id, motivo, notificar: true },
+      );
       const ok = await this.reabrirPublicacion(
         tx,
         id,
@@ -1025,7 +1043,9 @@ export class DonacionesService {
         where: { id },
         data: { modo_recoleccion: 'VOLUNTARIO' },
       });
+      return omitidas;
     });
+    this.retrazar(retrazos);
     const ofertas = await this.iniciarOfertaSegura(id);
     return {
       ...(await this.detalle(usuario, id)),
