@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import type { UsuarioAutenticado } from '../../comun/auth/tipos';
 import type { GoogleRoutesService } from '../../comun/google/google-routes.service';
 import type { PrismaService } from '../../comun/prisma/prisma.service';
@@ -104,6 +105,7 @@ function setup() {
     }) as Consulta,
   };
   const google = {
+    disponible: true,
     matriz: jest.fn().mockResolvedValue(matriz),
     ruta: jest.fn().mockResolvedValue(null),
   };
@@ -115,6 +117,7 @@ function setup() {
     asignarAFlota: jest.fn().mockResolvedValue('as1'),
     completar: jest.fn().mockResolvedValue(undefined),
     retrazarPendiente: jest.fn(),
+    trazarPendiente: jest.fn().mockResolvedValue(undefined),
   };
   const donaciones = {
     transicion: jest.fn().mockResolvedValue(true),
@@ -137,7 +140,7 @@ function setup() {
     { registrar: jest.fn() } as unknown as IncidenciasService,
   );
   jest.spyOn(servicio, 'detalle').mockResolvedValue({} as never);
-  return { servicio, google, insertRuta, parada, tx, asignacion };
+  return { servicio, google, insertRuta, parada, tx, asignacion, prisma };
 }
 
 describe('RuteoService.crear: geometría planificada', () => {
@@ -235,5 +238,110 @@ describe('RuteoService: retrazar el tramo pendiente al cerrar una parada', () =>
       servicio.fallida(voluntario, parada.parada_id, fallo as never),
     ).rejects.toThrow('bd caída');
     expect(asignacion.retrazarPendiente).not.toHaveBeenCalled();
+  });
+});
+
+describe('RuteoService.retrazarRutasSinTrazado: reintentar el trazado perdido', () => {
+  const sinTrazado = [
+    { id: 'r1', con_distancia: false, lat: 4.61, lng: -74.11 },
+    { id: 'r2', con_distancia: true, lat: 4.62, lng: -74.12 },
+  ];
+  let advertencia: jest.SpyInstance;
+  beforeEach(() => {
+    advertencia = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+  });
+  afterEach(() => advertencia.mockRestore());
+
+  /** Despacha la selección de rutas y la verificación posterior del trazado. */
+  function preparar(siguenSinTrazado: string[] = []) {
+    const s = setup();
+    const consultas: { sql: string; valores: unknown[] }[] = [];
+    s.prisma.$queryRaw.mockImplementation(
+      (partes: TemplateStringsArray, ...valores: unknown[]) => {
+        const sql = texto(partes);
+        consultas.push({ sql, valores });
+        if (sql.includes('AS con_distancia'))
+          return Promise.resolve(sinTrazado);
+        if (sql.includes('geometria IS NULL'))
+          return Promise.resolve(siguenSinTrazado.map((id) => ({ id })));
+        return Promise.resolve([]);
+      },
+    );
+    return { ...s, consultas };
+  }
+
+  it('selecciona solo rutas activas sin geometría con paradas pendientes, hasta el tope', async () => {
+    const { servicio, consultas } = preparar();
+    await servicio.retrazarRutasSinTrazado(7);
+    const seleccion = consultas.find((c) => c.sql.includes('AS con_distancia'));
+    expect(seleccion).toBeDefined();
+    const sql = seleccion!.sql;
+    expect(sql).toContain("r.estado IN ('PLANIFICADA','EN_CURSO')");
+    expect(sql).toContain('r.geometria IS NULL');
+    expect(sql).toContain("p.estado IN ('PENDIENTE','EN_SITIO')");
+    // Ni las terminadas ni las canceladas se vuelven a trazar.
+    expect(sql).not.toMatch(/r\.estado IN \([^)]*(COMPLETADA|CANCELADA)/);
+    expect(sql).toContain('LIMIT');
+    expect(seleccion!.valores).toContain(7);
+  });
+
+  it('traza cada ruta desde su origen y conserva la distancia planificada si existe', async () => {
+    const { servicio, asignacion } = preparar();
+    const intentadas = await servicio.retrazarRutasSinTrazado();
+    expect(asignacion.trazarPendiente).toHaveBeenCalledTimes(2);
+    // Sin distancia (la aceptación la dejó en NULL): la toma del trazado.
+    expect(asignacion.trazarPendiente).toHaveBeenNthCalledWith(
+      1,
+      'r1',
+      { lat: 4.61, lng: -74.11 },
+      { conservarDistancia: false },
+    );
+    // Con distancia planificada: solo cambia la geometría.
+    expect(asignacion.trazarPendiente).toHaveBeenNthCalledWith(
+      2,
+      'r2',
+      { lat: 4.62, lng: -74.12 },
+      { conservarDistancia: true },
+    );
+    expect(intentadas).toBe(2);
+  });
+
+  it('sin Google configurado no consulta ni traza: la geometría NULL es intencional', async () => {
+    const { servicio, google, asignacion, consultas } = preparar();
+    google.disponible = false;
+    await expect(servicio.retrazarRutasSinTrazado()).resolves.toBe(0);
+    expect(consultas).toHaveLength(0);
+    expect(asignacion.trazarPendiente).not.toHaveBeenCalled();
+  });
+
+  it('si falla una ruta sigue con las demás y avisa con su id', async () => {
+    const { servicio, asignacion } = preparar();
+    asignacion.trazarPendiente.mockRejectedValueOnce(new Error('bd caída'));
+    await expect(servicio.retrazarRutasSinTrazado()).resolves.toBe(2);
+    expect(asignacion.trazarPendiente).toHaveBeenCalledTimes(2);
+    expect(advertencia).toHaveBeenCalledWith(
+      expect.objectContaining({ rutaId: 'r1' }),
+      expect.any(String),
+    );
+  });
+
+  it('avisa por cada ruta que sigue sin trazado tras intentarlo', async () => {
+    const { servicio } = preparar(['r2']);
+    await servicio.retrazarRutasSinTrazado();
+    expect(advertencia).toHaveBeenCalledTimes(1);
+    expect(advertencia).toHaveBeenCalledWith(
+      { rutaId: 'r2' },
+      expect.any(String),
+    );
+  });
+
+  it('sin rutas pendientes de trazado no traza ni verifica nada', async () => {
+    const { servicio, asignacion, prisma } = preparar();
+    prisma.$queryRaw.mockResolvedValue([]);
+    await expect(servicio.retrazarRutasSinTrazado()).resolves.toBe(0);
+    expect(asignacion.trazarPendiente).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
   });
 });

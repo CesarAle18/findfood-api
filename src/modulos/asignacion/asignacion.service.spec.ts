@@ -95,6 +95,18 @@ describe('AsignacionService: retrazar el tramo pendiente', () => {
     );
   });
 
+  it('trazarPendiente espera el trazado y deja que quien llama maneje el error', async () => {
+    const { servicio, rutasDinamicas } = setup();
+    await servicio.trazarPendiente('r1', parada, { conservarDistancia: false });
+    expect(rutasDinamicas.trazar).toHaveBeenCalledWith('r1', parada, {
+      conservarDistancia: false,
+    });
+    rutasDinamicas.trazar.mockRejectedValue(new Error('bd caída'));
+    await expect(servicio.trazarPendiente('r1', parada)).rejects.toThrow(
+      'bd caída',
+    );
+  });
+
   it('abandonar retraza la ruta desde la parada omitida, tras la transacción', async () => {
     const { servicio, rutasDinamicas } = setup();
     await servicio.abandonar(voluntario, 'as1', { motivo_id: 1 });

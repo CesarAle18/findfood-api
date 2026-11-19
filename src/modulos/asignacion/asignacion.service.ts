@@ -90,6 +90,18 @@ export class AsignacionService {
       );
   }
 
+  /**
+   * Como retrazarPendiente, pero espera el trazado y deja el error a quien
+   * llama: la tarea que reintenta rutas sin trazado las recorre una a una.
+   */
+  trazarPendiente(
+    rutaId: string,
+    desde: Coordenada,
+    op: { conservarDistancia?: boolean } = {},
+  ): Promise<void> {
+    return this.rutasDinamicas.trazar(rutaId, desde, op);
+  }
+
   // ===========================================================================
   // Primitivas transaccionales
   // ===========================================================================
