@@ -101,6 +101,14 @@ export class TareasService {
     );
   }
 
+  /** Rutas activas que quedaron sin trazado por calles porque Google no respondió. */
+  @Cron(CronExpression.EVERY_MINUTE, { name: 'retrazar_rutas_sin_trazado' })
+  retrazarRutasSinTrazado() {
+    return this.ejecutar('retrazar_rutas_sin_trazado', () =>
+      this.ruteo.retrazarRutasSinTrazado(),
+    );
+  }
+
   /** Lotes con la fecha de vencimiento cumplida pasan a VENCIDO. */
   @Cron('5 0 * * *', { name: 'vencer_lotes', timeZone: ZONA_HORARIA })
   vencerLotes() {

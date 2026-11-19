@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import {
   esPersonal,
   tieneRol,
@@ -52,6 +52,14 @@ const UBICACION_RECIENTE_MIN = 30;
 /** Regla de negocio: una ruta activa (PLANIFICADA o EN_CURSO) no dura más que esto desde su creación. */
 export const RUTA_MAX_ACTIVA_HORAS = 24;
 const MOTIVO_RUTA_VENCIDA = `La ruta superó ${RUTA_MAX_ACTIVA_HORAS} horas activa`;
+/**
+ * Reintento del trazado por calles: solo rutas que cambiaron hace entre
+ * TRAZADO_ESPERA_MIN y TRAZADO_REINTENTO_MIN minutos. La espera deja terminar
+ * el trazado que corre tras aceptar; la ventana acota las llamadas a Google
+ * cuando no hay camino que trazar (una por ciclo, ~9 por cambio de la ruta).
+ */
+const TRAZADO_ESPERA_MIN = 1;
+const TRAZADO_REINTENTO_MIN = 10;
 
 interface DonacionRuta extends Coordenada {
   id: string;
@@ -87,6 +95,8 @@ interface ParadaBloqueada extends RutaBloqueada {
 
 @Injectable()
 export class RuteoService {
+  private readonly logger = new Logger(RuteoService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly parametros: ParametrosService,
@@ -1267,6 +1277,69 @@ export class RuteoService {
       },
       { maxWait: 5_000, timeout: 60_000 },
     );
+  }
+
+  /**
+   * Tarea retrazar_rutas_sin_trazado: aceptar deja la ruta sin geometría hasta
+   * que trazar() guarda la de Google, y si Google no respondió nada la vuelve a
+   * pedir; el voluntario vería las paradas sin camino. Reintenta, una a una y
+   * fuera de cualquier transacción, las rutas activas sin geometría con paradas
+   * pendientes. trazar() conserva sus reglas: no escribe si el orden cambió, y
+   * la distancia planificada no se toca; solo se toma la del trazado cuando la
+   * aceptación la dejó en NULL. Sin llave de Google la geometría NULL es la
+   * esperada y no se consulta nada. El origen es el de la aceptación (ubicación
+   * reciente o base del voluntario), salvo que la ubicación esté vieja y ya
+   * haya una parada atendida: entonces la última atendida.
+   * Devuelve cuántas rutas se intentaron trazar.
+   */
+  async retrazarRutasSinTrazado(lote = 10): Promise<number> {
+    if (!this.google.disponible) return 0;
+    const rutas = await this.prisma.$queryRaw<
+      (Coordenada & { id: string; con_distancia: boolean })[]
+    >`
+      SELECT r.id, r.distancia_total_km IS NOT NULL AS con_distancia,
+             ST_Y(o.punto::geometry) AS lat, ST_X(o.punto::geometry) AS lng
+        FROM ruta r
+        JOIN voluntario v ON v.id = r.voluntario_id
+       CROSS JOIN LATERAL (
+         SELECT GREATEST(r.updated_at, max(p.updated_at)) AS cambio
+           FROM parada_ruta p WHERE p.ruta_id = r.id) c
+       CROSS JOIN LATERAL (
+         SELECT COALESCE(
+           CASE WHEN v.ultima_ubicacion_at > now() - make_interval(mins => ${UBICACION_RECIENTE_MIN}::int)
+                THEN v.ultima_ubicacion END,
+           (SELECT a.ubicacion FROM parada_ruta a
+             WHERE a.ruta_id = r.id AND a.estado IN ('COMPLETADA','FALLIDA')
+             ORDER BY a.orden DESC LIMIT 1),
+           v.ubicacion_base) AS punto) o
+       WHERE r.estado IN ('PLANIFICADA','EN_CURSO') AND r.geometria IS NULL
+         AND EXISTS (SELECT 1 FROM parada_ruta p
+                      WHERE p.ruta_id = r.id AND p.estado IN ('PENDIENTE','EN_SITIO'))
+         AND o.punto IS NOT NULL
+         AND c.cambio <= now() - make_interval(mins => ${TRAZADO_ESPERA_MIN}::int)
+         AND c.cambio > now() - make_interval(mins => ${TRAZADO_REINTENTO_MIN}::int)
+       ORDER BY c.cambio DESC
+       LIMIT ${lote}`;
+    if (!rutas.length) return 0;
+    for (const r of rutas) {
+      try {
+        await this.asignacion.trazarPendiente(
+          r.id,
+          { lat: r.lat, lng: r.lng },
+          { conservarDistancia: r.con_distancia },
+        );
+      } catch (err) {
+        this.logger.warn({ err, rutaId: r.id }, 'No se pudo retrazar la ruta');
+      }
+    }
+    // Google no trazó (o el orden cambió mientras respondía): el siguiente ciclo
+    // lo vuelve a intentar mientras siga dentro de la ventana.
+    const siguen = await this.prisma.$queryRaw<{ id: string }[]>`
+      SELECT id FROM ruta
+       WHERE id = ANY(${rutas.map((r) => r.id)}::uuid[]) AND geometria IS NULL`;
+    for (const { id } of siguen)
+      this.logger.warn({ rutaId: id }, 'La ruta sigue sin trazado por calles');
+    return rutas.length;
   }
 
   private async parada(id: string) {
